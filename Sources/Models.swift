@@ -43,27 +43,45 @@ struct PlaylistTrack: Sendable {
     var duration: Double
 }
 
-enum AppMode: Sendable {
-    case nowPlaying
-    case library
-    case playlistTracks
-    case search
+enum Tab: Sendable {
+    case queue, library, search
+}
+
+enum LibrarySubView: Sendable {
+    case playlists
+    case tracks(String)
 }
 
 struct AppState: Sendable {
+    // Player
     var track: Track?
     var playerState: PlayerState = .stopped
     var volume: Int = 50
     var shuffleEnabled: Bool = false
     var repeatMode: RepeatMode = .off
-    var mode: AppMode = .nowPlaying
+    var musicRunning: Bool = true
+
+    // Tabs
+    var activeTab: Tab = .queue
+
+    // Queue tab
+    var queueTracks: [PlaylistTrack] = []
+    var queueSelected: Int = 0
+    var queueScroll: Int = 0
+    var queuePlaylistName: String = ""
+
+    // Library tab
     var playlists: [String] = []
-    var selectedIndex: Int = 0
-    var scrollOffset: Int = 0
+    var librarySubView: LibrarySubView = .playlists
+    var librarySelected: Int = 0
+    var libraryScroll: Int = 0
+    var playlistTracks: [PlaylistTrack] = []
+    var playlistTracksSelected: Int = 0
+    var playlistTracksScroll: Int = 0
+
+    // Search tab
     var searchQuery: String = ""
     var searchResults: [(name: String, artist: String, album: String)] = []
-    var currentPlaylistName: String = ""
-    var playlistTracks: [PlaylistTrack] = []
-    var musicRunning: Bool = true
+    var searchSelected: Int = 0
+    var searchScroll: Int = 0
 }
-

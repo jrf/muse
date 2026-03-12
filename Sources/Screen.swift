@@ -36,15 +36,14 @@ struct Screen {
         terminal.write(buffer)
     }
 
-    // MARK: - Layout Components
+    // MARK: - Main Renderer
 
-    mutating func renderNowPlaying(state: AppState, width: Int) {
-        let boxW = min(width - 2, 56)
-        let innerW = boxW - 4 // padding inside box
+    mutating func renderMain(state: AppState, width: Int, height: Int) {
+        let boxW = min(width - 2, 80)
         let leftPad = max(0, (width - boxW) / 2)
         let pad = String(repeating: " ", count: leftPad)
 
-        var row = 2
+        var row = 1
 
         // Top border
         moveTo(row: row, col: 1)
@@ -54,75 +53,33 @@ struct Screen {
         row += 1
 
         // Title bar
-        moveTo(row: row, col: 1)
-        setFg(75)
-        append(pad + "│")
-        setBold(); setFg(213)
-        let title = "  muse ♫"
-        append(title)
-        reset(); setFg(75)
-        append(String(repeating: " ", count: boxW - 2 - title.visualWidth))
-        append("│")
-        reset()
-        row += 1
+        row = titleBarLine(row: row, pad: pad, boxW: boxW, text: "  muse ♫")
 
         // Separator
-        moveTo(row: row, col: 1)
-        setFg(75)
-        append(pad + "├" + String(repeating: "─", count: boxW - 2) + "┤")
-        reset()
-        row += 1
+        row = separatorLine(row: row, pad: pad, boxW: boxW)
 
-        // Empty line
-        row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
-
-        if !state.musicRunning {
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "Music.app is not running", fg: 196)
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "Open Music.app to get started", fg: 245)
-        } else if let track = state.track {
-            // Song title
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(track.name, to: innerW), fg: 255, bold: true)
-
-            // Artist — Album
-            let subtitle = "\(track.artist) — \(track.album)"
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(subtitle, to: innerW), fg: 249)
-
-            // Empty line
-            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
-
-            // Progress bar
-            row = renderProgressBar(row: row, pad: pad, boxW: boxW, position: track.position, duration: track.duration)
-        } else {
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "No track playing", fg: 245)
-            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
-            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
-        }
-
-        // Empty line
-        row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
-
-        // Controls line
-        let playIcon = state.playerState == .playing ? "▐▐" : " ▶"
-        let shuffleStr = state.shuffleEnabled ? "⤮ on " : "⤮ off"
-        let repeatStr = "⟳ \(state.repeatMode.label)"
-        let volStr = "Vol: \(state.volume)%"
-        let controls = " ◂◂  \(playIcon)  ▸▸      \(shuffleStr)  \(repeatStr)   \(volStr) "
-        row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(controls, to: innerW), fg: 252)
-
-        // Empty line
-        row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+        // Player section
+        row = renderPlayerSection(state: state, row: row, pad: pad, boxW: boxW)
 
         // Separator
-        moveTo(row: row, col: 1)
-        setFg(75)
-        append(pad + "├" + String(repeating: "─", count: boxW - 2) + "┤")
-        reset()
-        row += 1
+        row = separatorLine(row: row, pad: pad, boxW: boxW)
 
-        // Help lines
-        row = helpBoxLine(row: row, pad: pad, boxW: boxW, text: "space Play/Pause · n Next · p Prev")
-        row = helpBoxLine(row: row, pad: pad, boxW: boxW, text: "+/- Volume · s Shuffle · r Repeat · q Quit")
-        row = helpBoxLine(row: row, pad: pad, boxW: boxW, text: "l Library · / Search")
+        // Tab bar
+        row = renderTabBar(state: state, row: row, pad: pad, boxW: boxW)
+
+        // Separator
+        row = separatorLine(row: row, pad: pad, boxW: boxW)
+
+        // Tab content — fills remaining height
+        // Reserve 3 rows for footer (separator + help + bottom border)
+        let contentRows = max(3, height - row - 2)
+        row = renderTabContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: contentRows)
+
+        // Separator
+        row = separatorLine(row: row, pad: pad, boxW: boxW)
+
+        // Help line
+        row = renderHelpLine(state: state, row: row, pad: pad, boxW: boxW)
 
         // Bottom border
         moveTo(row: row, col: 1)
@@ -131,211 +88,221 @@ struct Screen {
         reset()
     }
 
-    mutating func renderLibrary(playlists: [String], selected: Int, scrollOffset: Int, width: Int, height: Int) {
-        let boxW = min(width - 2, 56)
-        let innerW = boxW - 6
-        let leftPad = max(0, (width - boxW) / 2)
-        let pad = String(repeating: " ", count: leftPad)
-        let maxVisible = min(height - 10, 15)
+    // MARK: - Player Section
 
-        var row = 2
+    private mutating func renderPlayerSection(state: AppState, row: Int, pad: String, boxW: Int) -> Int {
+        var row = row
+        let innerW = boxW - 4
 
-        moveTo(row: row, col: 1)
-        setFg(75); setBold()
-        append(pad + "╭" + String(repeating: "─", count: boxW - 2) + "╮")
-        reset()
-        row += 1
+        if !state.musicRunning {
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "Music.app is not running", fg: 196)
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "Open Music.app to get started", fg: 245)
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+        } else if let track = state.track {
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(track.name, to: innerW), fg: 255, bold: true)
+            let subtitle = "\(track.artist) — \(track.album)"
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(subtitle, to: innerW), fg: 249)
+            row = renderProgressBar(row: row, pad: pad, boxW: boxW, position: track.position, duration: track.duration)
 
-        // Title
+            // Controls line
+            let playIcon = state.playerState == .playing ? "▐▐" : " ▶"
+            let shuffleStr = state.shuffleEnabled ? "⤮ on " : "⤮ off"
+            let repeatStr = "⟳ \(state.repeatMode.label)"
+            let volStr = "Vol: \(state.volume)%"
+            let controls = " ◂◂  \(playIcon)  ▸▸      \(shuffleStr)  \(repeatStr)   \(volStr) "
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(controls, to: innerW), fg: 252)
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+        } else {
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "No track playing", fg: 245)
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+        }
+
+        return row
+    }
+
+    // MARK: - Tab Bar
+
+    private mutating func renderTabBar(state: AppState, row: Int, pad: String, boxW: Int) -> Int {
         moveTo(row: row, col: 1)
         setFg(75)
-        append(pad + "│")
-        setBold(); setFg(213)
-        let title = "  Library"
-        append(title)
+        append(pad + "│  ")
+
+        let tabs: [(Tab, String)] = [(.queue, "Queue"), (.library, "Library"), (.search, "Search")]
+        var used = 0
+        for (i, (tab, label)) in tabs.enumerated() {
+            if i > 0 {
+                reset(); setFg(240)
+                append("  ")
+                used += 2
+            }
+            if tab == state.activeTab {
+                reset(); setFg(213); setBold()
+                let text = "[\(label)]"
+                append(text)
+                used += text.visualWidth
+            } else {
+                reset(); setFg(252)
+                append(" \(label) ")
+                used += label.count + 2
+            }
+        }
+
         reset(); setFg(75)
-        append(String(repeating: " ", count: boxW - 2 - title.visualWidth))
+        append(String(repeating: " ", count: max(0, boxW - 4 - used)))
         append("│")
         reset()
-        row += 1
+        return row + 1
+    }
 
-        moveTo(row: row, col: 1)
-        setFg(75)
-        append(pad + "├" + String(repeating: "─", count: boxW - 2) + "┤")
-        reset()
-        row += 1
+    // MARK: - Tab Content
 
-        if playlists.isEmpty {
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "No playlists found", fg: 245)
+    private mutating func renderTabContent(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int) -> Int {
+        switch state.activeTab {
+        case .queue:
+            return renderQueueContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows)
+        case .library:
+            return renderLibraryContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows)
+        case .search:
+            return renderSearchContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows)
+        }
+    }
+
+    private mutating func renderQueueContent(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int) -> Int {
+        var row = row
+        let innerW = boxW - 6
+
+        if state.queueTracks.isEmpty {
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "No queue — play a playlist to fill", fg: 245)
+            // Fill remaining rows
+            let filled = 2
+            for _ in filled..<maxRows {
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+            }
         } else {
-            let end = min(scrollOffset + maxVisible, playlists.count)
-            for i in scrollOffset..<end {
+            let end = min(state.queueScroll + maxRows, state.queueTracks.count)
+            var rendered = 0
+            for i in state.queueScroll..<end {
+                let t = state.queueTracks[i]
+                row = renderTrackLine(row: row, pad: pad, boxW: boxW, innerW: innerW,
+                                      name: "\(t.name) — \(t.artist)", duration: t.duration,
+                                      selected: i == state.queueSelected)
+                rendered += 1
+            }
+            // Fill remaining rows
+            for _ in rendered..<maxRows {
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+            }
+        }
+        return row
+    }
+
+    private mutating func renderLibraryContent(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int) -> Int {
+        switch state.librarySubView {
+        case .playlists:
+            return renderPlaylistList(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows)
+        case .tracks(let name):
+            return renderPlaylistTracksContent(state: state, playlistName: name, row: row, pad: pad, boxW: boxW, maxRows: maxRows)
+        }
+    }
+
+    private mutating func renderPlaylistList(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int) -> Int {
+        var row = row
+        let innerW = boxW - 6
+
+        if state.playlists.isEmpty {
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "Loading playlists…", fg: 245)
+            let filled = 2
+            for _ in filled..<maxRows {
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+            }
+        } else {
+            let end = min(state.libraryScroll + maxRows, state.playlists.count)
+            var rendered = 0
+            for i in state.libraryScroll..<end {
                 moveTo(row: row, col: 1)
                 setFg(75)
                 append(pad + "│  ")
-                if i == selected {
+                if i == state.librarySelected {
                     setFg(213); setBold()
                     append("▸ ")
                 } else {
                     setFg(252)
                     append("  ")
                 }
-                let name = truncate(playlists[i], to: innerW)
+                let name = truncate(state.playlists[i], to: innerW)
                 append(name)
                 reset(); setFg(75)
-                let used = (i == selected ? 2 : 2) + name.visualWidth
+                let used = 2 + name.visualWidth
                 append(String(repeating: " ", count: max(0, innerW + 2 - used)))
                 append("│")
                 reset()
                 row += 1
+                rendered += 1
+            }
+            for _ in rendered..<maxRows {
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
             }
         }
-
-        row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
-
-        // Help
-        moveTo(row: row, col: 1)
-        setFg(75)
-        append(pad + "├" + String(repeating: "─", count: boxW - 2) + "┤")
-        reset()
-        row += 1
-
-        row = helpBoxLine(row: row, pad: pad, boxW: boxW, text: "↑/↓ Navigate · Enter Browse · Esc Back")
-
-        moveTo(row: row, col: 1)
-        setFg(75)
-        append(pad + "╰" + String(repeating: "─", count: boxW - 2) + "╯")
-        reset()
+        return row
     }
 
-    mutating func renderPlaylistTracks(playlistName: String, tracks: [PlaylistTrack], selected: Int, scrollOffset: Int, width: Int, height: Int) {
-        let boxW = min(width - 2, 56)
+    private mutating func renderPlaylistTracksContent(state: AppState, playlistName: String, row: Int, pad: String, boxW: Int, maxRows: Int) -> Int {
+        var row = row
         let innerW = boxW - 6
-        let leftPad = max(0, (width - boxW) / 2)
-        let pad = String(repeating: " ", count: leftPad)
-        let maxVisible = min(height - 10, 15)
 
-        var row = 2
-
-        moveTo(row: row, col: 1)
-        setFg(75); setBold()
-        append(pad + "╭" + String(repeating: "─", count: boxW - 2) + "╮")
-        reset()
-        row += 1
-
-        // Title — playlist name
+        // Header with back indicator and playlist name
         moveTo(row: row, col: 1)
         setFg(75)
-        append(pad + "│")
-        setBold(); setFg(213)
-        let title = "  " + truncate(playlistName, to: boxW - 6)
-        append(title)
+        append(pad + "│  ")
+        setFg(245); setDim()
+        let header = "← \(truncate(playlistName, to: innerW - 2))"
+        append(header)
         reset(); setFg(75)
-        append(String(repeating: " ", count: max(0, boxW - 2 - title.visualWidth)))
+        append(String(repeating: " ", count: max(0, boxW - 4 - header.visualWidth)))
         append("│")
         reset()
         row += 1
 
-        moveTo(row: row, col: 1)
-        setFg(75)
-        append(pad + "├" + String(repeating: "─", count: boxW - 2) + "┤")
-        reset()
-        row += 1
+        let trackRows = maxRows - 1 // one row used by header
 
-        if tracks.isEmpty {
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "No tracks", fg: 245)
+        if state.playlistTracks.isEmpty {
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "Loading…", fg: 245)
+            let filled = 1
+            for _ in filled..<trackRows {
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+            }
         } else {
-            let end = min(scrollOffset + maxVisible, tracks.count)
-            for i in scrollOffset..<end {
-                let t = tracks[i]
-                moveTo(row: row, col: 1)
-                setFg(75)
-                append(pad + "│  ")
-                if i == selected {
-                    setFg(213); setBold()
-                    append("▸ ")
-                } else {
-                    setFg(252)
-                    append("  ")
-                }
-                let dur = formatTime(t.duration)
-                let maxNameW = innerW - dur.count - 1
-                let entry = "\(t.name) — \(t.artist)"
-                let truncEntry = truncate(entry, to: max(0, maxNameW))
-                append(truncEntry)
-                reset(); setFg(240)
-                let used = 2 + truncEntry.visualWidth
-                let gap = max(1, innerW + 2 - used - dur.count)
-                append(String(repeating: " ", count: gap))
-                append(dur)
-                reset(); setFg(75)
-                append("│")
-                reset()
-                row += 1
+            let end = min(state.playlistTracksScroll + trackRows, state.playlistTracks.count)
+            var rendered = 0
+            for i in state.playlistTracksScroll..<end {
+                let t = state.playlistTracks[i]
+                row = renderTrackLine(row: row, pad: pad, boxW: boxW, innerW: innerW,
+                                      name: "\(t.name) — \(t.artist)", duration: t.duration,
+                                      selected: i == state.playlistTracksSelected)
+                rendered += 1
             }
-
-            // Track count
-            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
-            let countStr = "\(tracks.count) tracks"
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: countStr, fg: 245)
+            for _ in rendered..<trackRows {
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+            }
         }
-
-        row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
-
-        moveTo(row: row, col: 1)
-        setFg(75)
-        append(pad + "├" + String(repeating: "─", count: boxW - 2) + "┤")
-        reset()
-        row += 1
-
-        row = helpBoxLine(row: row, pad: pad, boxW: boxW, text: "↑/↓ Nav · Enter Play · Space Play All · Esc Back")
-
-        moveTo(row: row, col: 1)
-        setFg(75)
-        append(pad + "╰" + String(repeating: "─", count: boxW - 2) + "╯")
-        reset()
+        return row
     }
 
-    mutating func renderSearch(query: String, results: [(name: String, artist: String, album: String)], selected: Int, scrollOffset: Int, width: Int, height: Int) {
-        let boxW = min(width - 2, 56)
+    private mutating func renderSearchContent(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int) -> Int {
+        var row = row
         let innerW = boxW - 6
-        let leftPad = max(0, (width - boxW) / 2)
-        let pad = String(repeating: " ", count: leftPad)
-        let maxVisible = min(height - 12, 12)
-
-        var row = 2
-
-        moveTo(row: row, col: 1)
-        setFg(75); setBold()
-        append(pad + "╭" + String(repeating: "─", count: boxW - 2) + "╮")
-        reset()
-        row += 1
-
-        // Title
-        moveTo(row: row, col: 1)
-        setFg(75)
-        append(pad + "│")
-        setBold(); setFg(213)
-        let title = "  Search"
-        append(title)
-        reset(); setFg(75)
-        append(String(repeating: " ", count: boxW - 2 - title.visualWidth))
-        append("│")
-        reset()
-        row += 1
-
-        moveTo(row: row, col: 1)
-        setFg(75)
-        append(pad + "├" + String(repeating: "─", count: boxW - 2) + "┤")
-        reset()
-        row += 1
 
         // Search input
         moveTo(row: row, col: 1)
         setFg(75)
         append(pad + "│  ")
         setFg(252)
-        let prompt = "/ " + query + "▏"
+        let prompt = "/ " + state.searchQuery + "▏"
         append(truncate(prompt, to: innerW + 2))
         reset(); setFg(75)
         append(String(repeating: " ", count: max(0, boxW - 4 - prompt.visualWidth)))
@@ -343,18 +310,29 @@ struct Screen {
         reset()
         row += 1
 
-        row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+        let resultRows = maxRows - 1 // one row used by search input
 
-        if results.isEmpty && !query.isEmpty {
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "No results", fg: 245)
+        if state.searchResults.isEmpty {
+            if !state.searchQuery.isEmpty {
+                row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "No results", fg: 245)
+                let filled = 1
+                for _ in filled..<resultRows {
+                    row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+                }
+            } else {
+                for _ in 0..<resultRows {
+                    row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+                }
+            }
         } else {
-            let end = min(scrollOffset + maxVisible, results.count)
-            for i in scrollOffset..<end {
-                let r = results[i]
+            let end = min(state.searchScroll + resultRows, state.searchResults.count)
+            var rendered = 0
+            for i in state.searchScroll..<end {
+                let r = state.searchResults[i]
                 moveTo(row: row, col: 1)
                 setFg(75)
                 append(pad + "│  ")
-                if i == selected {
+                if i == state.searchSelected {
                     setFg(213); setBold()
                     append("▸ ")
                 } else {
@@ -369,26 +347,84 @@ struct Screen {
                 append("│")
                 reset()
                 row += 1
+                rendered += 1
+            }
+            for _ in rendered..<resultRows {
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
             }
         }
+        return row
+    }
 
-        row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+    // MARK: - Help Line
 
+    private mutating func renderHelpLine(state: AppState, row: Int, pad: String, boxW: Int) -> Int {
+        let help: String
+        switch state.activeTab {
+        case .queue:
+            help = "1/2/3 Tabs · ↑/↓ Nav · Enter Play · space Pause · q Quit"
+        case .library:
+            switch state.librarySubView {
+            case .playlists:
+                help = "1/2/3 Tabs · ↑/↓ Nav · Enter Browse · space Pause · q Quit"
+            case .tracks:
+                help = "1/2/3 Tabs · ↑/↓ Nav · Enter Play · Esc Back · q Quit"
+            }
+        case .search:
+            help = "Type to search · ↑/↓ Nav · Enter Play · Esc Clear · q Quit"
+        }
+        return helpBoxLine(row: row, pad: pad, boxW: boxW, text: help)
+    }
+
+    // MARK: - Helpers
+
+    private mutating func renderTrackLine(row: Int, pad: String, boxW: Int, innerW: Int,
+                                          name: String, duration: Double, selected: Bool) -> Int {
+        moveTo(row: row, col: 1)
+        setFg(75)
+        append(pad + "│  ")
+        if selected {
+            setFg(213); setBold()
+            append("▸ ")
+        } else {
+            setFg(252)
+            append("  ")
+        }
+        let dur = formatTime(duration)
+        let maxNameW = innerW - dur.count - 1
+        let truncEntry = truncate(name, to: max(0, maxNameW))
+        append(truncEntry)
+        reset(); setFg(240)
+        let used = 2 + truncEntry.visualWidth
+        let gap = max(1, innerW + 2 - used - dur.count)
+        append(String(repeating: " ", count: gap))
+        append(dur)
+        reset(); setFg(75)
+        append("│")
+        reset()
+        return row + 1
+    }
+
+    private mutating func titleBarLine(row: Int, pad: String, boxW: Int, text: String) -> Int {
+        moveTo(row: row, col: 1)
+        setFg(75)
+        append(pad + "│")
+        setBold(); setFg(213)
+        append(text)
+        reset(); setFg(75)
+        append(String(repeating: " ", count: max(0, boxW - 2 - text.visualWidth)))
+        append("│")
+        reset()
+        return row + 1
+    }
+
+    private mutating func separatorLine(row: Int, pad: String, boxW: Int) -> Int {
         moveTo(row: row, col: 1)
         setFg(75)
         append(pad + "├" + String(repeating: "─", count: boxW - 2) + "┤")
         reset()
-        row += 1
-
-        row = helpBoxLine(row: row, pad: pad, boxW: boxW, text: "Type to search · ↑/↓ Nav · Enter Play · Esc Back")
-
-        moveTo(row: row, col: 1)
-        setFg(75)
-        append(pad + "╰" + String(repeating: "─", count: boxW - 2) + "╯")
-        reset()
+        return row + 1
     }
-
-    // MARK: - Helpers
 
     private mutating func emptyBoxLine(row: Int, pad: String, boxW: Int) -> Int {
         moveTo(row: row, col: 1)
@@ -483,12 +519,9 @@ struct Screen {
 
 extension String {
     var visualWidth: Int {
-        // Approximate: count characters, treating most as width 1.
-        // This is sufficient for ASCII + basic Unicode.
         var w = 0
         for scalar in self.unicodeScalars {
             let v = scalar.value
-            // CJK and wide chars
             if (v >= 0x1100 && v <= 0x115F) ||
                (v >= 0x2E80 && v <= 0xA4CF) ||
                (v >= 0xAC00 && v <= 0xD7AF) ||

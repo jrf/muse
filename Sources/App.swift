@@ -21,15 +21,22 @@ final class App: @unchecked Sendable {
             terminal.clearScreen()
         }
 
-        // Install signal handler for clean exit
         signal(SIGINT, SIG_IGN)
 
         // Initial state fetch (blocking for first render)
         applyFresh(music.fetchFullState())
+
+        // Pre-load playlists so library tab is populated immediately
+        refreshQueue.async { [self] in
+            let playlists = music.getPlaylists()
+            stateLock.lock()
+            state.playlists = playlists
+            stateLock.unlock()
+        }
+
         render()
 
         while running {
-            // Handle input
             if let key = terminal.readKey() {
                 handleKey(key)
                 render()
@@ -71,106 +78,157 @@ final class App: @unchecked Sendable {
         state.repeatMode = fresh.repeatMode
     }
 
+    // MARK: - Key Handling
+
     private func handleKey(_ key: Key) {
-        switch state.mode {
-        case .nowPlaying:
-            handleNowPlayingKey(key)
+        if handleGlobalKey(key) { return }
+
+        switch state.activeTab {
+        case .queue:
+            handleQueueKey(key)
         case .library:
             handleLibraryKey(key)
-        case .playlistTracks:
-            handlePlaylistTracksKey(key)
         case .search:
             handleSearchKey(key)
         }
     }
 
-    private func fireAndRefresh(_ action: @escaping @Sendable () -> Void) {
-        refreshQueue.async { [self] in
-            action()
-            let fresh = music.fetchFullState()
-            stateLock.lock()
-            pendingState = fresh
-            refreshInFlight = false
-            stateLock.unlock()
-        }
-    }
+    /// Returns true if the key was consumed globally.
+    private func handleGlobalKey(_ key: Key) -> Bool {
+        let inSearch = state.activeTab == .search
 
-    private func handleNowPlayingKey(_ key: Key) {
         switch key {
         case .character("q"):
             running = false
+            return true
+        case .character("1"):
+            state.activeTab = .queue
+            return true
+        case .character("2"):
+            if !inSearch {
+                state.activeTab = .library
+                return true
+            }
+        case .character("l"):
+            if !inSearch {
+                state.activeTab = .library
+                return true
+            }
+        case .character("3"):
+            state.activeTab = .search
+            return true
+        case .character("/"):
+            state.activeTab = .search
+            return true
         case .space:
-            // Optimistic toggle
             state.playerState = state.playerState == .playing ? .paused : .playing
             fireAndRefresh { [self] in music.playPause() }
+            return true
         case .character("n"):
-            fireAndRefresh { [self] in music.nextTrack() }
+            if !inSearch {
+                fireAndRefresh { [self] in music.nextTrack() }
+                return true
+            }
         case .character("p"):
-            fireAndRefresh { [self] in music.previousTrack() }
+            if !inSearch {
+                fireAndRefresh { [self] in music.previousTrack() }
+                return true
+            }
         case .character("+"), .character("="):
             state.volume = min(100, state.volume + 5)
             let vol = state.volume
             refreshQueue.async { [self] in music.setVolume(vol) }
+            return true
         case .character("-"):
-            state.volume = max(0, state.volume - 5)
-            let vol = state.volume
-            refreshQueue.async { [self] in music.setVolume(vol) }
-        case .character("s"):
-            state.shuffleEnabled.toggle()
-            fireAndRefresh { [self] in music.toggleShuffle() }
-        case .character("r"):
-            state.repeatMode = state.repeatMode.next
-            fireAndRefresh { [self] in music.cycleRepeat() }
-        case .character("l"):
-            state.mode = .library
-            state.selectedIndex = 0
-            state.scrollOffset = 0
-            state.playlists = [] // show empty while loading
-            refreshQueue.async { [self] in
-                let playlists = music.getPlaylists()
-                stateLock.lock()
-                state.playlists = playlists
-                stateLock.unlock()
+            if !inSearch {
+                state.volume = max(0, state.volume - 5)
+                let vol = state.volume
+                refreshQueue.async { [self] in music.setVolume(vol) }
+                return true
             }
-        case .character("/"):
-            state.mode = .search
-            state.searchQuery = ""
-            state.searchResults = []
-            state.selectedIndex = 0
-            state.scrollOffset = 0
+        case .character("s"):
+            if !inSearch {
+                state.shuffleEnabled.toggle()
+                fireAndRefresh { [self] in music.toggleShuffle() }
+                return true
+            }
+        case .character("r"):
+            if !inSearch {
+                state.repeatMode = state.repeatMode.next
+                fireAndRefresh { [self] in music.cycleRepeat() }
+                return true
+            }
+        default:
+            break
+        }
+        return false
+    }
+
+    // MARK: - Queue Tab
+
+    private func handleQueueKey(_ key: Key) {
+        switch key {
+        case .up:
+            if state.queueSelected > 0 {
+                state.queueSelected -= 1
+                if state.queueSelected < state.queueScroll {
+                    state.queueScroll = state.queueSelected
+                }
+            }
+        case .down:
+            if state.queueSelected < state.queueTracks.count - 1 {
+                state.queueSelected += 1
+                let maxVisible = contentRows()
+                if state.queueSelected >= state.queueScroll + maxVisible {
+                    state.queueScroll = state.queueSelected - maxVisible + 1
+                }
+            }
+        case .enter:
+            if !state.queueTracks.isEmpty && state.queueSelected < state.queueTracks.count {
+                let playlist = state.queuePlaylistName
+                let idx = state.queueSelected
+                fireAndRefresh { [self] in music.playTrackInPlaylist(playlist, trackIndex: idx) }
+            }
         default:
             break
         }
     }
 
+    // MARK: - Library Tab
+
     private func handleLibraryKey(_ key: Key) {
+        switch state.librarySubView {
+        case .playlists:
+            handleLibraryPlaylistsKey(key)
+        case .tracks:
+            handleLibraryTracksKey(key)
+        }
+    }
+
+    private func handleLibraryPlaylistsKey(_ key: Key) {
         switch key {
-        case .escape, .character("q"):
-            state.mode = .nowPlaying
         case .up:
-            if state.selectedIndex > 0 {
-                state.selectedIndex -= 1
-                if state.selectedIndex < state.scrollOffset {
-                    state.scrollOffset = state.selectedIndex
+            if state.librarySelected > 0 {
+                state.librarySelected -= 1
+                if state.librarySelected < state.libraryScroll {
+                    state.libraryScroll = state.librarySelected
                 }
             }
         case .down:
-            if state.selectedIndex < state.playlists.count - 1 {
-                state.selectedIndex += 1
-                let size = terminal.getSize()
-                let maxVisible = min(size.height - 10, 15)
-                if state.selectedIndex >= state.scrollOffset + maxVisible {
-                    state.scrollOffset = state.selectedIndex - maxVisible + 1
+            if state.librarySelected < state.playlists.count - 1 {
+                state.librarySelected += 1
+                let maxVisible = contentRows()
+                if state.librarySelected >= state.libraryScroll + maxVisible {
+                    state.libraryScroll = state.librarySelected - maxVisible + 1
                 }
             }
         case .enter:
-            if !state.playlists.isEmpty && state.selectedIndex < state.playlists.count {
-                let name = state.playlists[state.selectedIndex]
-                state.currentPlaylistName = name
-                state.playlistTracks = [] // show empty while loading
-                state.mode = .playlistTracks
-                state.selectedIndex = 0
-                state.scrollOffset = 0
+            if !state.playlists.isEmpty && state.librarySelected < state.playlists.count {
+                let name = state.playlists[state.librarySelected]
+                state.librarySubView = .tracks(name)
+                state.playlistTracks = []
+                state.playlistTracksSelected = 0
+                state.playlistTracksScroll = 0
                 refreshQueue.async { [self] in
                     let tracks = music.getPlaylistTracks(name)
                     stateLock.lock()
@@ -183,82 +241,82 @@ final class App: @unchecked Sendable {
         }
     }
 
-    private func handlePlaylistTracksKey(_ key: Key) {
+    private func handleLibraryTracksKey(_ key: Key) {
         switch key {
         case .escape:
-            // Go back to playlist list, restore selection
-            state.mode = .library
-            state.selectedIndex = state.playlists.firstIndex(of: state.currentPlaylistName) ?? 0
-            state.scrollOffset = max(0, state.selectedIndex - 5)
-        case .character("q"):
-            state.mode = .nowPlaying
+            state.librarySubView = .playlists
         case .up:
-            if state.selectedIndex > 0 {
-                state.selectedIndex -= 1
-                if state.selectedIndex < state.scrollOffset {
-                    state.scrollOffset = state.selectedIndex
+            if state.playlistTracksSelected > 0 {
+                state.playlistTracksSelected -= 1
+                if state.playlistTracksSelected < state.playlistTracksScroll {
+                    state.playlistTracksScroll = state.playlistTracksSelected
                 }
             }
         case .down:
-            if state.selectedIndex < state.playlistTracks.count - 1 {
-                state.selectedIndex += 1
-                let size = terminal.getSize()
-                let maxVisible = min(size.height - 10, 15)
-                if state.selectedIndex >= state.scrollOffset + maxVisible {
-                    state.scrollOffset = state.selectedIndex - maxVisible + 1
+            if state.playlistTracksSelected < state.playlistTracks.count - 1 {
+                state.playlistTracksSelected += 1
+                // Subtract 1 for the "← Back" header row
+                let maxVisible = contentRows() - 1
+                if state.playlistTracksSelected >= state.playlistTracksScroll + maxVisible {
+                    state.playlistTracksScroll = state.playlistTracksSelected - maxVisible + 1
                 }
             }
         case .enter:
-            if !state.playlistTracks.isEmpty && state.selectedIndex < state.playlistTracks.count {
-                let playlist = state.currentPlaylistName
-                let idx = state.selectedIndex
-                state.mode = .nowPlaying
-                fireAndRefresh { [self] in music.playTrackInPlaylist(playlist, trackIndex: idx) }
+            if !state.playlistTracks.isEmpty && state.playlistTracksSelected < state.playlistTracks.count {
+                if case .tracks(let playlistName) = state.librarySubView {
+                    let idx = state.playlistTracksSelected
+                    // Populate queue with this playlist's tracks
+                    state.queueTracks = state.playlistTracks
+                    state.queuePlaylistName = playlistName
+                    state.queueSelected = idx
+                    state.queueScroll = max(0, idx - 3)
+                    fireAndRefresh { [self] in music.playTrackInPlaylist(playlistName, trackIndex: idx) }
+                }
             }
-        case .space:
-            let playlist = state.currentPlaylistName
-            state.mode = .nowPlaying
-            fireAndRefresh { [self] in music.playPlaylist(playlist) }
         default:
             break
         }
     }
 
+    // MARK: - Search Tab
+
     private func handleSearchKey(_ key: Key) {
         switch key {
         case .escape:
-            state.mode = .nowPlaying
+            state.searchQuery = ""
+            state.searchResults = []
+            state.searchSelected = 0
+            state.searchScroll = 0
         case .backspace:
             if !state.searchQuery.isEmpty {
                 state.searchQuery.removeLast()
                 performSearch()
             }
         case .up:
-            if state.selectedIndex > 0 {
-                state.selectedIndex -= 1
-                if state.selectedIndex < state.scrollOffset {
-                    state.scrollOffset = state.selectedIndex
+            if state.searchSelected > 0 {
+                state.searchSelected -= 1
+                if state.searchSelected < state.searchScroll {
+                    state.searchScroll = state.searchSelected
                 }
             }
         case .down:
-            if state.selectedIndex < state.searchResults.count - 1 {
-                state.selectedIndex += 1
-                let size = terminal.getSize()
-                let maxVisible = min(size.height - 12, 12)
-                if state.selectedIndex >= state.scrollOffset + maxVisible {
-                    state.scrollOffset = state.selectedIndex - maxVisible + 1
+            if state.searchSelected < state.searchResults.count - 1 {
+                state.searchSelected += 1
+                // Subtract 1 for the search input row
+                let maxVisible = contentRows() - 1
+                if state.searchSelected >= state.searchScroll + maxVisible {
+                    state.searchScroll = state.searchSelected - maxVisible + 1
                 }
             }
         case .enter:
-            if !state.searchResults.isEmpty && state.selectedIndex < state.searchResults.count {
-                let result = state.searchResults[state.selectedIndex]
-                state.mode = .nowPlaying
+            if !state.searchResults.isEmpty && state.searchSelected < state.searchResults.count {
+                let result = state.searchResults[state.searchSelected]
                 fireAndRefresh { [self] in music.playTrack(result.name, artist: result.artist) }
             }
         case .character(let ch):
             state.searchQuery.append(ch)
-            state.selectedIndex = 0
-            state.scrollOffset = 0
+            state.searchSelected = 0
+            state.searchScroll = 0
             performSearch()
         default:
             break
@@ -274,7 +332,6 @@ final class App: @unchecked Sendable {
         refreshQueue.async { [self] in
             let results = music.searchTracks(query)
             stateLock.lock()
-            // Only apply if query hasn't changed while we were searching
             if state.searchQuery == query {
                 state.searchResults = results
             }
@@ -282,41 +339,32 @@ final class App: @unchecked Sendable {
         }
     }
 
+    // MARK: - Render
+
     private func render() {
         let size = terminal.getSize()
         var screen = Screen()
-
-        switch state.mode {
-        case .nowPlaying:
-            screen.renderNowPlaying(state: state, width: size.width)
-        case .library:
-            screen.renderLibrary(
-                playlists: state.playlists,
-                selected: state.selectedIndex,
-                scrollOffset: state.scrollOffset,
-                width: size.width,
-                height: size.height
-            )
-        case .playlistTracks:
-            screen.renderPlaylistTracks(
-                playlistName: state.currentPlaylistName,
-                tracks: state.playlistTracks,
-                selected: state.selectedIndex,
-                scrollOffset: state.scrollOffset,
-                width: size.width,
-                height: size.height
-            )
-        case .search:
-            screen.renderSearch(
-                query: state.searchQuery,
-                results: state.searchResults,
-                selected: state.selectedIndex,
-                scrollOffset: state.scrollOffset,
-                width: size.width,
-                height: size.height
-            )
-        }
-
+        screen.renderMain(state: state, width: size.width, height: size.height)
         screen.flush(to: terminal)
+    }
+
+    // MARK: - Helpers
+
+    private func fireAndRefresh(_ action: @escaping @Sendable () -> Void) {
+        refreshQueue.async { [self] in
+            action()
+            let fresh = music.fetchFullState()
+            stateLock.lock()
+            pendingState = fresh
+            refreshInFlight = false
+            stateLock.unlock()
+        }
+    }
+
+    /// Compute the number of content rows available for the tab's list area.
+    private func contentRows() -> Int {
+        let size = terminal.getSize()
+        // Chrome: top border(1) + title(1) + sep(1) + player(~7) + sep(1) + tab bar(1) + sep(1) + sep(1) + help(1) + bottom border(1) = ~16
+        return max(3, size.height - 16)
     }
 }
