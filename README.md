@@ -33,9 +33,9 @@ Launch `muse` in any terminal. The player panel at the top always shows the curr
 
 | Key | Action |
 |-----|--------|
-| `1` | Queue tab |
-| `2` / `l` | Library tab |
-| `3` / `/` | Search tab |
+| `Tab` / `Shift+Tab` | Cycle tabs |
+| `l` | Library tab |
+| `/` | Search tab |
 | `space` | Play / Pause |
 | `n` | Next track |
 | `p` | Previous track |
