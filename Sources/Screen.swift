@@ -299,6 +299,8 @@ struct Screen {
             ("s", "Toggle shuffle"),
             ("r", "Cycle repeat"),
             ("C", "Clear queue"),
+            ("a", "Search artist"),
+            ("A", "Search album"),
             ("\u{2191} / \u{2193}", "Navigate list"),
             ("Enter", "Play / Browse"),
             ("Backspace", "Back / Clear"),

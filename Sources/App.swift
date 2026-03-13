@@ -228,6 +228,24 @@ final class App: @unchecked Sendable {
                 fireAndRefresh { [self] in music.cycleRepeat() }
                 return true
             }
+        case .character("a"):
+            if !inSearch, let artist = state.track?.artist, !artist.isEmpty {
+                state.activeTab = .search
+                state.searchQuery = artist
+                state.searchSelected = 0
+                state.searchScroll = 0
+                performSearch()
+                return true
+            }
+        case .character("A"):
+            if let album = state.track?.album, !album.isEmpty {
+                state.activeTab = .search
+                state.searchQuery = album
+                state.searchSelected = 0
+                state.searchScroll = 0
+                performSearch()
+                return true
+            }
         default:
             break
         }
