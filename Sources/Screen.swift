@@ -240,7 +240,7 @@ struct Screen {
         setFg(theme.border)
         append(pad + "│  ")
 
-        let tabs: [(Tab, String)] = [(.queue, "Queue"), (.library, "Library"), (.search, "Search"), (.themes, "Themes")]
+        let tabs: [(Tab, String)] = [(.queue, "Queue"), (.library, "Library"), (.search, "Search"), (.lyrics, "Lyrics"), (.themes, "Themes")]
         var used = 0
         for (i, (tab, label)) in tabs.enumerated() {
             if i > 0 {
@@ -280,6 +280,8 @@ struct Screen {
             return renderLibraryContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows, theme: theme)
         case .search:
             return renderSearchContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows, theme: theme)
+        case .lyrics:
+            return renderLyricsContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows, theme: theme)
         case .themes:
             return renderThemesContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows, theme: theme)
         }
@@ -301,6 +303,7 @@ struct Screen {
             ("C", "Clear queue"),
             ("a", "Search artist"),
             ("A", "Search album"),
+            ("L", "Lyrics tab"),
             ("\u{2191} / \u{2193}", "Navigate list"),
             ("Enter", "Play / Browse"),
             ("Backspace", "Back / Clear"),
@@ -548,6 +551,45 @@ struct Screen {
                 rendered += 1
             }
             for _ in rendered..<resultRows {
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
+            }
+        }
+        return row
+    }
+
+    private mutating func renderLyricsContent(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int, theme: Theme) -> Int {
+        var row = row
+        let innerW = boxW - 4
+
+        if state.lyricsLines.isEmpty {
+            // Center "No lyrics available" vertically
+            let topPad = max(0, (maxRows - 1) / 2)
+            for _ in 0..<topPad {
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
+            }
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "No lyrics available", fg: theme.textDim, theme: theme)
+            let filled = topPad + 1
+            for _ in filled..<maxRows {
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
+            }
+        } else {
+            let end = min(state.lyricsScroll + maxRows, state.lyricsLines.count)
+            var rendered = 0
+            for i in state.lyricsScroll..<end {
+                moveTo(row: row, col: 1)
+                setFg(theme.border)
+                append(pad + "│ ")
+                setFg(theme.text)
+                let line = truncate(state.lyricsLines[i], to: innerW)
+                append(line)
+                reset(); setFg(theme.border)
+                append(String(repeating: " ", count: max(0, innerW - line.visualWidth)))
+                append(" │")
+                reset()
+                row += 1
+                rendered += 1
+            }
+            for _ in rendered..<maxRows {
                 row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
             }
         }

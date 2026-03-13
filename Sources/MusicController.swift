@@ -231,6 +231,71 @@ struct MusicController: Sendable {
         _ = runAppleScript(script)
     }
 
+    func getLyrics(trackName: String, artist: String) -> String? {
+        // First try embedded lyrics via AppleScript
+        let script = """
+        tell application "Music"
+            if player state is stopped then return ""
+            set t to current track
+            try
+                set ly to lyrics of t
+                if ly is not missing value and ly is not "" then return ly
+            end try
+            return ""
+        end tell
+        """
+        if let embedded = runAppleScript(script), !embedded.isEmpty {
+            return embedded
+        }
+
+        // Fall back to LRCLIB API
+        guard !trackName.isEmpty, !artist.isEmpty else { return nil }
+        var components = URLComponents(string: "https://lrclib.net/api/get")!
+        components.queryItems = [
+            URLQueryItem(name: "track_name", value: trackName),
+            URLQueryItem(name: "artist_name", value: artist),
+        ]
+        guard let url = components.url else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 5
+        request.setValue("muse-tui/1.0", forHTTPHeaderField: "User-Agent")
+
+        guard let (data, _) = try? synchronousDataTask(request) else { return nil }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+
+        // Prefer plain lyrics over synced (synced has timestamps)
+        if let plain = json["plainLyrics"] as? String, !plain.isEmpty {
+            return plain
+        } else if let synced = json["syncedLyrics"] as? String, !synced.isEmpty {
+            // Strip timestamp prefixes like "[00:12.34] "
+            let lines = synced.components(separatedBy: "\n").map { line -> String in
+                if line.hasPrefix("["), let bracket = line.firstIndex(of: "]") {
+                    let after = line.index(after: bracket)
+                    return String(line[after...]).trimmingCharacters(in: .whitespaces)
+                }
+                return line
+            }
+            return lines.joined(separator: "\n")
+        }
+        return nil
+    }
+
+    private func synchronousDataTask(_ request: URLRequest) throws -> (Data, URLResponse) {
+        let semaphore = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var resultData: Data?
+        nonisolated(unsafe) var resultResponse: URLResponse?
+        nonisolated(unsafe) var resultError: Error?
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            resultData = data
+            resultResponse = response
+            resultError = error
+            semaphore.signal()
+        }.resume()
+        semaphore.wait()
+        if let error = resultError { throw error }
+        return (resultData ?? Data(), resultResponse!)
+    }
+
     func fetchFullState() -> AppState {
         var state = AppState()
         // Single osascript call to get everything at once

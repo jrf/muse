@@ -121,6 +121,31 @@ final class App: @unchecked Sendable {
         if sixelSupported && newKey != oldKey {
             fetchArtworkAsync(key: newKey)
         }
+
+        // Fetch lyrics when track changes
+        let lyricsKey = state.track.map { "\($0.name)\t\($0.artist)" } ?? ""
+        if lyricsKey != state.lyricsTrackKey {
+            state.lyricsTrackKey = lyricsKey
+            state.lyricsScroll = 0
+            if lyricsKey.isEmpty {
+                state.lyricsText = ""
+                state.lyricsLines = []
+            } else {
+                let trackName = state.track!.name
+                let trackArtist = state.track!.artist
+                refreshQueue.async { [self] in
+                    let text = music.getLyrics(trackName: trackName, artist: trackArtist) ?? ""
+                    let lines = text.isEmpty ? [] : text.components(separatedBy: "\n")
+                    stateLock.lock()
+                    if state.lyricsTrackKey == lyricsKey {
+                        state.lyricsText = text
+                        state.lyricsLines = lines
+                        state.lyricsScroll = 0
+                    }
+                    stateLock.unlock()
+                }
+            }
+        }
     }
 
     // MARK: - Key Handling
@@ -135,6 +160,8 @@ final class App: @unchecked Sendable {
             handleLibraryKey(key)
         case .search:
             handleSearchKey(key)
+        case .lyrics:
+            handleLyricsKey(key)
         case .themes:
             handleThemesKey(key)
         }
@@ -162,7 +189,8 @@ final class App: @unchecked Sendable {
             switch state.activeTab {
             case .queue: state.activeTab = .library
             case .library: state.activeTab = .search
-            case .search: state.activeTab = .themes
+            case .search: state.activeTab = .lyrics
+            case .lyrics: state.activeTab = .themes
             case .themes: state.activeTab = .queue
             }
             return true
@@ -171,12 +199,18 @@ final class App: @unchecked Sendable {
             case .queue: state.activeTab = .themes
             case .library: state.activeTab = .queue
             case .search: state.activeTab = .library
-            case .themes: state.activeTab = .search
+            case .lyrics: state.activeTab = .search
+            case .themes: state.activeTab = .lyrics
             }
             return true
         case .character("l"):
             if !inSearch {
                 state.activeTab = .library
+                return true
+            }
+        case .character("L"):
+            if !inSearch {
+                state.activeTab = .lyrics
                 return true
             }
         case .character("/"):
@@ -426,6 +460,24 @@ final class App: @unchecked Sendable {
         }
     }
 
+    // MARK: - Lyrics Tab
+
+    private func handleLyricsKey(_ key: Key) {
+        switch key {
+        case .up:
+            if state.lyricsScroll > 0 {
+                state.lyricsScroll -= 1
+            }
+        case .down:
+            let maxVisible = contentRows()
+            if state.lyricsScroll < max(0, state.lyricsLines.count - maxVisible) {
+                state.lyricsScroll += 1
+            }
+        default:
+            break
+        }
+    }
+
     // MARK: - Themes Tab
 
     private func handleThemesKey(_ key: Key) {
@@ -553,6 +605,22 @@ final class App: @unchecked Sendable {
                 if sixelSupported {
                     let key = "\(artist)\t\(album)"
                     fetchArtworkAsync(key: key)
+                }
+
+                // Fetch lyrics for new track
+                let lyricsKey = "\(name)\t\(artist)"
+                state.lyricsTrackKey = lyricsKey
+                state.lyricsScroll = 0
+                refreshQueue.async { [self] in
+                    let text = music.getLyrics(trackName: name, artist: artist) ?? ""
+                    let lines = text.isEmpty ? [] : text.components(separatedBy: "\n")
+                    stateLock.lock()
+                    if state.lyricsTrackKey == lyricsKey {
+                        state.lyricsText = text
+                        state.lyricsLines = lines
+                        state.lyricsScroll = 0
+                    }
+                    stateLock.unlock()
                 }
             }
         }
