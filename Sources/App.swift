@@ -189,6 +189,7 @@ final class App: @unchecked Sendable {
             running = false
             return true
         case .tab:
+            let wasThemes = state.activeTab == .themes
             switch state.activeTab {
             case .queue: state.activeTab = .library
             case .library: state.activeTab = .search
@@ -196,8 +197,10 @@ final class App: @unchecked Sendable {
             case .lyrics: state.activeTab = .themes
             case .themes: state.activeTab = .queue
             }
+            if wasThemes { restoreSavedTheme() }
             return true
         case .shiftTab:
+            let wasThemes = state.activeTab == .themes
             switch state.activeTab {
             case .queue: state.activeTab = .themes
             case .library: state.activeTab = .queue
@@ -205,18 +208,22 @@ final class App: @unchecked Sendable {
             case .lyrics: state.activeTab = .search
             case .themes: state.activeTab = .lyrics
             }
+            if wasThemes { restoreSavedTheme() }
             return true
         case .character("l"):
             if !inSearch {
+                if state.activeTab == .themes { restoreSavedTheme() }
                 state.activeTab = .library
                 return true
             }
         case .character("L"):
             if !inSearch {
+                if state.activeTab == .themes { restoreSavedTheme() }
                 state.activeTab = .lyrics
                 return true
             }
         case .character("/"):
+            if state.activeTab == .themes { restoreSavedTheme() }
             state.activeTab = .search
             return true
         case .space:
@@ -497,6 +504,7 @@ final class App: @unchecked Sendable {
                 if state.themeSelected < state.themeScroll {
                     state.themeScroll = state.themeSelected
                 }
+                previewTheme()
             }
         case .down:
             if state.themeSelected < themes.count - 1 {
@@ -505,6 +513,7 @@ final class App: @unchecked Sendable {
                 if state.themeSelected >= state.themeScroll + maxVisible {
                     state.themeScroll = state.themeSelected - maxVisible + 1
                 }
+                previewTheme()
             }
         case .enter:
             if state.themeSelected < themes.count {
@@ -515,6 +524,19 @@ final class App: @unchecked Sendable {
             }
         default:
             break
+        }
+    }
+
+    private func previewTheme() {
+        let themes = Theme.allThemes
+        if state.themeSelected < themes.count {
+            currentTheme = themes[state.themeSelected].theme
+        }
+    }
+
+    private func restoreSavedTheme() {
+        if let entry = Theme.allThemes.first(where: { $0.name == state.themeName }) {
+            currentTheme = entry.theme
         }
     }
 

@@ -31,7 +31,7 @@ struct Theme: Sendable {
             border: 65, accent: 114, text: 151, textBright: 194,
             textDim: 108, textMuted: 59, timeText: 150, error: 196
         )),
-        ("tokyo night", Theme(
+        ("tokyo night moon", Theme(
             border: 61, accent: 141, text: 189, textBright: 195,
             textDim: 103, textMuted: 60, timeText: 117, error: 210
         )),
