@@ -124,7 +124,8 @@ struct Screen {
                 let startRow = row
 
                 // Text lines to render on the right
-                let trackName = truncate(track.name, to: textW)
+                let favSuffix = state.currentTrackFavorited ? " ♥" : ""
+                let trackName = truncate(track.name + favSuffix, to: textW)
                 let subtitle = truncate("\(track.artist) — \(track.album)", to: textW)
                 let playIcon = state.playerState == .playing ? "▐▐" : " ▶"
                 let shuffleStr = state.shuffleEnabled ? "⤮ on " : "⤮ off"
@@ -211,7 +212,8 @@ struct Screen {
             } else {
                 // Text-only layout (no artwork or terminal too narrow)
                 row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
-                row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(track.name, to: innerW), fg: theme.textBright, bold: true, theme: theme)
+                let favSuffix = state.currentTrackFavorited ? " ♥" : ""
+                row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(track.name + favSuffix, to: innerW), fg: theme.textBright, bold: true, theme: theme)
                 let subtitle = "\(track.artist) — \(track.album)"
                 row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(subtitle, to: innerW), fg: theme.timeText, theme: theme)
                 row = renderProgressBar(row: row, pad: pad, boxW: boxW, position: track.position, duration: track.duration, theme: theme)
@@ -273,6 +275,9 @@ struct Screen {
         if state.showHelp {
             return renderHelpOverlay(row: row, pad: pad, boxW: boxW, maxRows: maxRows, theme: theme)
         }
+        if state.showPlaylistPicker {
+            return renderPlaylistPickerOverlay(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows, theme: theme)
+        }
         switch state.activeTab {
         case .queue:
             return renderQueueContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows, theme: theme)
@@ -301,6 +306,8 @@ struct Screen {
             ("s", "Toggle shuffle"),
             ("r", "Cycle repeat"),
             ("C", "Clear queue"),
+            ("f", "Toggle favorite"),
+            ("P", "Add to playlist"),
             ("a", "Search artist"),
             ("A", "Search album"),
             ("L", "Lyrics tab"),
@@ -367,6 +374,53 @@ struct Screen {
         // Fill remaining rows
         for _ in rendered..<maxRows {
             row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
+        }
+        return row
+    }
+
+    private mutating func renderPlaylistPickerOverlay(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int, theme: Theme) -> Int {
+        var row = row
+        let innerW = boxW - 6
+
+        // Header
+        row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "Add to Playlist", fg: theme.accent, bold: true, theme: theme)
+        row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
+
+        let listRows = maxRows - 2 // header + blank line
+
+        if state.playlists.isEmpty {
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "No playlists", fg: theme.textDim, theme: theme)
+            let filled = 1
+            for _ in filled..<listRows {
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
+            }
+        } else {
+            let end = min(state.playlistPickerScroll + listRows, state.playlists.count)
+            var rendered = 0
+            for i in state.playlistPickerScroll..<end {
+                moveTo(row: row, col: 1)
+                setFg(theme.border)
+                append(pad + "│  ")
+                if i == state.playlistPickerSelected {
+                    setFg(theme.accent); setBold()
+                    append("▸ ")
+                } else {
+                    setFg(theme.text)
+                    append("  ")
+                }
+                let name = truncate(state.playlists[i], to: innerW)
+                append(name)
+                reset(); setFg(theme.border)
+                let used = 2 + name.visualWidth
+                append(String(repeating: " ", count: max(0, innerW + 2 - used)))
+                append("│")
+                reset()
+                row += 1
+                rendered += 1
+            }
+            for _ in rendered..<listRows {
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
+            }
         }
         return row
     }

@@ -316,6 +316,44 @@ struct MusicController: Sendable {
         return (resultData ?? Data(), resultResponse!)
     }
 
+    func isTrackFavorited() -> Bool {
+        let script = """
+        tell application "Music"
+            if player state is stopped then return "false"
+            try
+                return loved of current track as string
+            end try
+            return "false"
+        end tell
+        """
+        return runAppleScript(script) == "true"
+    }
+
+    func toggleFavorite() {
+        let script = """
+        tell application "Music"
+            if player state is not stopped then
+                try
+                    set loved of current track to not (loved of current track)
+                end try
+            end if
+        end tell
+        """
+        _ = runAppleScript(script)
+    }
+
+    func addCurrentTrackToPlaylist(_ name: String) {
+        let escaped = name.replacingOccurrences(of: "\"", with: "\\\"")
+        let script = """
+        tell application "Music"
+            if player state is not stopped then
+                duplicate current track to playlist "\(escaped)"
+            end if
+        end tell
+        """
+        _ = runAppleScript(script)
+    }
+
     func fetchFullState() -> AppState {
         var state = AppState()
         // Single osascript call to get everything at once
@@ -337,7 +375,11 @@ struct MusicController: Sendable {
             set tal to album of t
             set td to duration of t
             set tp to player position
-            return ps & "||" & vol & "||" & sh & "||" & sr & "||" & tn & "||" & ta & "||" & tal & "||" & td & "||" & tp
+            set tl to false
+            try
+                set tl to loved of t
+            end try
+            return ps & "||" & vol & "||" & sh & "||" & sr & "||" & tn & "||" & ta & "||" & tal & "||" & td & "||" & tp & "||" & tl
         end tell
         """
         guard let result = runAppleScript(script) else {
@@ -374,6 +416,9 @@ struct MusicController: Sendable {
                     duration: Double(parts[7]) ?? 0,
                     position: Double(parts[8]) ?? 0
                 )
+                if parts.count >= 10 {
+                    state.currentTrackFavorited = parts[9] == "true"
+                }
             }
         }
         return state

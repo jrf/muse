@@ -115,6 +115,7 @@ final class App: @unchecked Sendable {
         state.volume = fresh.volume
         state.shuffleEnabled = fresh.shuffleEnabled
         state.repeatMode = fresh.repeatMode
+        state.currentTrackFavorited = fresh.currentTrackFavorited
         lastPositionUpdate = Date()
 
         let newKey = artworkCacheKey(for: state.track)
@@ -179,6 +180,38 @@ final class App: @unchecked Sendable {
         }
         if state.showHelp {
             state.showHelp = false
+            return true
+        }
+
+        // Playlist picker overlay
+        if state.showPlaylistPicker {
+            switch key {
+            case .up:
+                if state.playlistPickerSelected > 0 {
+                    state.playlistPickerSelected -= 1
+                    if state.playlistPickerSelected < state.playlistPickerScroll {
+                        state.playlistPickerScroll = state.playlistPickerSelected
+                    }
+                }
+            case .down:
+                if state.playlistPickerSelected < state.playlists.count - 1 {
+                    state.playlistPickerSelected += 1
+                    let maxVisible = contentRows()
+                    if state.playlistPickerSelected >= state.playlistPickerScroll + maxVisible {
+                        state.playlistPickerScroll = state.playlistPickerSelected - maxVisible + 1
+                    }
+                }
+            case .enter:
+                if !state.playlists.isEmpty && state.playlistPickerSelected < state.playlists.count {
+                    let name = state.playlists[state.playlistPickerSelected]
+                    state.showPlaylistPicker = false
+                    refreshQueue.async { [self] in music.addCurrentTrackToPlaylist(name) }
+                }
+            case .escape, .backspace, .character("P"):
+                state.showPlaylistPicker = false
+            default:
+                break
+            }
             return true
         }
 
@@ -279,6 +312,19 @@ final class App: @unchecked Sendable {
                 state.searchSelected = 0
                 state.searchScroll = 0
                 performSearch()
+                return true
+            }
+        case .character("f"):
+            if !inSearch {
+                state.currentTrackFavorited.toggle()
+                fireAndRefresh { [self] in music.toggleFavorite() }
+                return true
+            }
+        case .character("P"):
+            if !inSearch {
+                state.showPlaylistPicker.toggle()
+                state.playlistPickerSelected = 0
+                state.playlistPickerScroll = 0
                 return true
             }
         case .character("A"):

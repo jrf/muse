@@ -100,4 +100,12 @@ struct AppState: Sendable {
 
     // Help overlay
     var showHelp: Bool = false
+
+    // Favorite
+    var currentTrackFavorited: Bool = false
+
+    // Playlist picker overlay
+    var showPlaylistPicker: Bool = false
+    var playlistPickerSelected: Int = 0
+    var playlistPickerScroll: Int = 0
 }
