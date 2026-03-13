@@ -1,0 +1,26 @@
+default:
+    @just --list
+
+# Build in debug mode
+build:
+    swift build
+
+# Build in release mode
+release:
+    swift build -c release
+
+# Run the app
+run:
+    swift run muse
+
+# Install to /usr/local/bin
+install: release
+    cp .build/release/muse ~/.local/bin/
+
+# Uninstall from /usr/local/bin
+uninstall:
+    rm -f /usr/local/bin/muse
+
+# Remove build artifacts
+clean:
+    swift package clean
