@@ -10,6 +10,7 @@ A terminal UI for controlling Apple Music on macOS.
 - Browse playlists and search your library
 - Jump to the current track's artist or album with a single key
 - Queue management with auto-advance
+- Lyrics display fetched from LRCLIB (with embedded lyrics fallback)
 - Album art display via sixel graphics in supported terminals
 - Customizable color themes
 
@@ -45,6 +46,7 @@ Launch `muse` in any terminal. The player panel at the top always shows the curr
 | `Tab` / `Shift+Tab` | Cycle tabs |
 | `l` | Library tab |
 | `/` | Search tab |
+| `L` | Lyrics tab |
 | `space` | Play / Pause |
 | `n` | Next track |
 | `p` | Previous track |
@@ -55,7 +57,7 @@ Launch `muse` in any terminal. The player panel at the top always shows the curr
 | `C` | Clear queue |
 | `a` | Search current track's artist |
 | `A` | Search current track's album |
-| `↑` / `↓` | Navigate list |
+| `↑` / `↓` | Navigate list / Scroll lyrics |
 | `Enter` | Play track / Browse playlist |
 | `Backspace` | Back (library) / Clear (search) |
 | `?` | Toggle help overlay |
@@ -66,6 +68,7 @@ Launch `muse` in any terminal. The player panel at the top always shows the curr
 - **Queue** — tracks from the last playlist you played. Select a track and press Enter to jump to it. Tracks auto-advance when the current one finishes.
 - **Library** — browse your playlists. Press Enter to see tracks, Enter again to play. Backspace goes back to the playlist list.
 - **Search** — type to search your library. Results appear as you type (minimum 2 characters). Enter plays the selected result.
+- **Lyrics** — displays lyrics for the current track. Fetched from [LRCLIB](https://lrclib.net) (falls back to embedded lyrics if available). Scroll with arrow keys. Shows "No lyrics available" when none are found.
 - **Themes** — select a color theme. Press Enter to apply.
 
 Playback controls (`space`, `n`, `p`, `+`/`-`, `s`, `r`) work from any tab. In the Search tab, letter keys are captured for typing, so `n`/`p`/`s`/`r`/`a` only work as playback controls from the other tabs.
