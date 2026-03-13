@@ -13,9 +13,10 @@ release:
 run:
     swift run muse
 
-# Install to /usr/local/bin
+# Install to ~/.local/bin
 install: release
     cp .build/release/muse ~/.local/bin/
+    codesign -s - ~/.local/bin/muse
 
 # Uninstall from /usr/local/bin
 uninstall:

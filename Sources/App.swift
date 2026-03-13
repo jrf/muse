@@ -7,6 +7,7 @@ final class App: @unchecked Sendable {
     private let terminal = Terminal()
     private let music = MusicController()
     private var state = AppState()
+    private var currentTheme = Theme.defaultTheme
     private var running = true
     private var lastRefresh: Date = .distantPast
     private let refreshInterval: TimeInterval = 2.0
@@ -26,6 +27,9 @@ final class App: @unchecked Sendable {
 
         signal(SIGINT, SIG_IGN)
         signal(SIGWINCH) { _ in sigwinchReceived = 1 }
+
+        // Load persisted theme
+        loadConfig()
 
         // Initial state fetch (blocking for first render)
         applyFresh(music.fetchFullState())
@@ -116,6 +120,8 @@ final class App: @unchecked Sendable {
             handleLibraryKey(key)
         case .search:
             handleSearchKey(key)
+        case .themes:
+            handleThemesKey(key)
         }
     }
 
@@ -131,14 +137,16 @@ final class App: @unchecked Sendable {
             switch state.activeTab {
             case .queue: state.activeTab = .library
             case .library: state.activeTab = .search
-            case .search: state.activeTab = .queue
+            case .search: state.activeTab = .themes
+            case .themes: state.activeTab = .queue
             }
             return true
         case .shiftTab:
             switch state.activeTab {
-            case .queue: state.activeTab = .search
+            case .queue: state.activeTab = .themes
             case .library: state.activeTab = .queue
             case .search: state.activeTab = .library
+            case .themes: state.activeTab = .search
             }
             return true
         case .character("l"):
@@ -368,6 +376,67 @@ final class App: @unchecked Sendable {
         }
     }
 
+    // MARK: - Themes Tab
+
+    private func handleThemesKey(_ key: Key) {
+        let themes = Theme.allThemes
+        switch key {
+        case .up:
+            if state.themeSelected > 0 {
+                state.themeSelected -= 1
+                if state.themeSelected < state.themeScroll {
+                    state.themeScroll = state.themeSelected
+                }
+            }
+        case .down:
+            if state.themeSelected < themes.count - 1 {
+                state.themeSelected += 1
+                let maxVisible = contentRows()
+                if state.themeSelected >= state.themeScroll + maxVisible {
+                    state.themeScroll = state.themeSelected - maxVisible + 1
+                }
+            }
+        case .enter:
+            if state.themeSelected < themes.count {
+                let (name, theme) = themes[state.themeSelected]
+                state.themeName = name
+                currentTheme = theme
+                saveTheme(name)
+            }
+        default:
+            break
+        }
+    }
+
+    // MARK: - Config
+
+    private static let configDir = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".config/muse")
+    private static let configFile = configDir.appendingPathComponent("config")
+
+    private func loadConfig() {
+        guard let contents = try? String(contentsOf: Self.configFile, encoding: .utf8) else { return }
+        for line in contents.split(separator: "\n") {
+            let parts = line.split(separator: "=", maxSplits: 1)
+            if parts.count == 2 && parts[0].trimmingCharacters(in: .whitespaces) == "theme" {
+                let name = parts[1].trimmingCharacters(in: .whitespaces)
+                if let entry = Theme.allThemes.first(where: { $0.name == name }) {
+                    state.themeName = entry.name
+                    currentTheme = entry.theme
+                    if let idx = Theme.allThemes.firstIndex(where: { $0.name == name }) {
+                        state.themeSelected = idx
+                    }
+                }
+            }
+        }
+    }
+
+    private func saveTheme(_ name: String) {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: Self.configDir, withIntermediateDirectories: true)
+        try? "theme=\(name)\n".write(to: Self.configFile, atomically: true, encoding: .utf8)
+    }
+
     // MARK: - Render
 
     private func render() {
@@ -379,7 +448,7 @@ final class App: @unchecked Sendable {
             displayState.track?.position = min(track.position + elapsed, track.duration)
         }
         var screen = Screen()
-        screen.renderMain(state: displayState, width: size.width, height: size.height)
+        screen.renderMain(state: displayState, width: size.width, height: size.height, theme: currentTheme)
         screen.flush(to: terminal)
     }
 

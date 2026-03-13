@@ -39,7 +39,7 @@ struct Screen {
 
     // MARK: - Main Renderer
 
-    mutating func renderMain(state: AppState, width: Int, height: Int) {
+    mutating func renderMain(state: AppState, width: Int, height: Int, theme: Theme) {
         let boxW = min(width - 2, 80)
         let leftPad = max(0, (width - boxW) / 2)
         let pad = String(repeating: " ", count: leftPad)
@@ -48,64 +48,64 @@ struct Screen {
 
         // Top border
         moveTo(row: row, col: 1)
-        setFg(75); setBold()
+        setFg(theme.border); setBold()
         append(pad + "╭" + String(repeating: "─", count: boxW - 2) + "╮")
         reset()
         row += 1
 
         // Title bar
-        row = titleBarLine(row: row, pad: pad, boxW: boxW, text: "  muse ♫")
+        row = titleBarLine(row: row, pad: pad, boxW: boxW, text: "  muse ♫", theme: theme)
 
         // Separator
-        row = separatorLine(row: row, pad: pad, boxW: boxW)
+        row = separatorLine(row: row, pad: pad, boxW: boxW, theme: theme)
 
         // Player section
-        row = renderPlayerSection(state: state, row: row, pad: pad, boxW: boxW)
+        row = renderPlayerSection(state: state, row: row, pad: pad, boxW: boxW, theme: theme)
 
         // Separator
-        row = separatorLine(row: row, pad: pad, boxW: boxW)
+        row = separatorLine(row: row, pad: pad, boxW: boxW, theme: theme)
 
         // Tab bar
-        row = renderTabBar(state: state, row: row, pad: pad, boxW: boxW)
+        row = renderTabBar(state: state, row: row, pad: pad, boxW: boxW, theme: theme)
 
         // Separator
-        row = separatorLine(row: row, pad: pad, boxW: boxW)
+        row = separatorLine(row: row, pad: pad, boxW: boxW, theme: theme)
 
         // Tab content — fills remaining height
         // Reserve 3 rows for footer (separator + help + bottom border)
         let contentRows = max(3, height - row - 2)
-        row = renderTabContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: contentRows)
+        row = renderTabContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: contentRows, theme: theme)
 
         // Separator
-        row = separatorLine(row: row, pad: pad, boxW: boxW)
+        row = separatorLine(row: row, pad: pad, boxW: boxW, theme: theme)
 
         // Help line
-        row = renderHelpLine(state: state, row: row, pad: pad, boxW: boxW)
+        row = renderHelpLine(state: state, row: row, pad: pad, boxW: boxW, theme: theme)
 
         // Bottom border
         moveTo(row: row, col: 1)
-        setFg(75)
+        setFg(theme.border)
         append(pad + "╰" + String(repeating: "─", count: boxW - 2) + "╯")
         reset()
     }
 
     // MARK: - Player Section
 
-    private mutating func renderPlayerSection(state: AppState, row: Int, pad: String, boxW: Int) -> Int {
+    private mutating func renderPlayerSection(state: AppState, row: Int, pad: String, boxW: Int, theme: Theme) -> Int {
         var row = row
         let innerW = boxW - 4
 
         if !state.musicRunning {
-            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "Music.app is not running", fg: 196)
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "Open Music.app to get started", fg: 245)
-            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "Music.app is not running", fg: theme.error, theme: theme)
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "Open Music.app to get started", fg: theme.textDim, theme: theme)
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
         } else if let track = state.track {
-            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(track.name, to: innerW), fg: 255, bold: true)
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(track.name, to: innerW), fg: theme.textBright, bold: true, theme: theme)
             let subtitle = "\(track.artist) — \(track.album)"
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(subtitle, to: innerW), fg: 249)
-            row = renderProgressBar(row: row, pad: pad, boxW: boxW, position: track.position, duration: track.duration)
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(subtitle, to: innerW), fg: theme.timeText, theme: theme)
+            row = renderProgressBar(row: row, pad: pad, boxW: boxW, position: track.position, duration: track.duration, theme: theme)
 
             // Controls line
             let playIcon = state.playerState == .playing ? "▐▐" : " ▶"
@@ -113,12 +113,12 @@ struct Screen {
             let repeatStr = "⟳ \(state.repeatMode.label)"
             let volStr = "Vol: \(state.volume)%"
             let controls = " ◂◂  \(playIcon)  ▸▸      \(shuffleStr)  \(repeatStr)   \(volStr) "
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(controls, to: innerW), fg: 252)
-            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(controls, to: innerW), fg: theme.text, theme: theme)
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
         } else {
-            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "No track playing", fg: 245)
-            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "No track playing", fg: theme.textDim, theme: theme)
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
         }
 
         return row
@@ -126,32 +126,32 @@ struct Screen {
 
     // MARK: - Tab Bar
 
-    private mutating func renderTabBar(state: AppState, row: Int, pad: String, boxW: Int) -> Int {
+    private mutating func renderTabBar(state: AppState, row: Int, pad: String, boxW: Int, theme: Theme) -> Int {
         moveTo(row: row, col: 1)
-        setFg(75)
+        setFg(theme.border)
         append(pad + "│  ")
 
-        let tabs: [(Tab, String)] = [(.queue, "Queue"), (.library, "Library"), (.search, "Search")]
+        let tabs: [(Tab, String)] = [(.queue, "Queue"), (.library, "Library"), (.search, "Search"), (.themes, "Themes")]
         var used = 0
         for (i, (tab, label)) in tabs.enumerated() {
             if i > 0 {
-                reset(); setFg(240)
+                reset(); setFg(theme.textMuted)
                 append("  ")
                 used += 2
             }
             if tab == state.activeTab {
-                reset(); setFg(213); setBold()
+                reset(); setFg(theme.accent); setBold()
                 let text = "[\(label)]"
                 append(text)
                 used += text.visualWidth
             } else {
-                reset(); setFg(252)
+                reset(); setFg(theme.text)
                 append(" \(label) ")
                 used += label.count + 2
             }
         }
 
-        reset(); setFg(75)
+        reset(); setFg(theme.border)
         append(String(repeating: " ", count: max(0, boxW - 4 - used)))
         append("│")
         reset()
@@ -160,28 +160,30 @@ struct Screen {
 
     // MARK: - Tab Content
 
-    private mutating func renderTabContent(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int) -> Int {
+    private mutating func renderTabContent(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int, theme: Theme) -> Int {
         switch state.activeTab {
         case .queue:
-            return renderQueueContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows)
+            return renderQueueContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows, theme: theme)
         case .library:
-            return renderLibraryContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows)
+            return renderLibraryContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows, theme: theme)
         case .search:
-            return renderSearchContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows)
+            return renderSearchContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows, theme: theme)
+        case .themes:
+            return renderThemesContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows, theme: theme)
         }
     }
 
-    private mutating func renderQueueContent(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int) -> Int {
+    private mutating func renderQueueContent(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int, theme: Theme) -> Int {
         var row = row
         let innerW = boxW - 6
 
         if state.queueTracks.isEmpty {
-            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "No queue — play a playlist to fill", fg: 245)
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "No queue — play a playlist to fill", fg: theme.textDim, theme: theme)
             // Fill remaining rows
             let filled = 2
             for _ in filled..<maxRows {
-                row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
             }
         } else {
             let end = min(state.queueScroll + maxRows, state.queueTracks.count)
@@ -190,54 +192,54 @@ struct Screen {
                 let t = state.queueTracks[i]
                 row = renderTrackLine(row: row, pad: pad, boxW: boxW, innerW: innerW,
                                       name: "\(t.name) — \(t.artist)", duration: t.duration,
-                                      selected: i == state.queueSelected)
+                                      selected: i == state.queueSelected, theme: theme)
                 rendered += 1
             }
             // Fill remaining rows
             for _ in rendered..<maxRows {
-                row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
             }
         }
         return row
     }
 
-    private mutating func renderLibraryContent(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int) -> Int {
+    private mutating func renderLibraryContent(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int, theme: Theme) -> Int {
         switch state.librarySubView {
         case .playlists:
-            return renderPlaylistList(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows)
+            return renderPlaylistList(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows, theme: theme)
         case .tracks(let name):
-            return renderPlaylistTracksContent(state: state, playlistName: name, row: row, pad: pad, boxW: boxW, maxRows: maxRows)
+            return renderPlaylistTracksContent(state: state, playlistName: name, row: row, pad: pad, boxW: boxW, maxRows: maxRows, theme: theme)
         }
     }
 
-    private mutating func renderPlaylistList(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int) -> Int {
+    private mutating func renderPlaylistList(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int, theme: Theme) -> Int {
         var row = row
         let innerW = boxW - 6
 
         if state.playlists.isEmpty {
-            row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "Loading playlists…", fg: 245)
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "Loading playlists…", fg: theme.textDim, theme: theme)
             let filled = 2
             for _ in filled..<maxRows {
-                row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
             }
         } else {
             let end = min(state.libraryScroll + maxRows, state.playlists.count)
             var rendered = 0
             for i in state.libraryScroll..<end {
                 moveTo(row: row, col: 1)
-                setFg(75)
+                setFg(theme.border)
                 append(pad + "│  ")
                 if i == state.librarySelected {
-                    setFg(213); setBold()
+                    setFg(theme.accent); setBold()
                     append("▸ ")
                 } else {
-                    setFg(252)
+                    setFg(theme.text)
                     append("  ")
                 }
                 let name = truncate(state.playlists[i], to: innerW)
                 append(name)
-                reset(); setFg(75)
+                reset(); setFg(theme.border)
                 let used = 2 + name.visualWidth
                 append(String(repeating: " ", count: max(0, innerW + 2 - used)))
                 append("│")
@@ -246,24 +248,24 @@ struct Screen {
                 rendered += 1
             }
             for _ in rendered..<maxRows {
-                row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
             }
         }
         return row
     }
 
-    private mutating func renderPlaylistTracksContent(state: AppState, playlistName: String, row: Int, pad: String, boxW: Int, maxRows: Int) -> Int {
+    private mutating func renderPlaylistTracksContent(state: AppState, playlistName: String, row: Int, pad: String, boxW: Int, maxRows: Int, theme: Theme) -> Int {
         var row = row
         let innerW = boxW - 6
 
         // Header with back indicator and playlist name
         moveTo(row: row, col: 1)
-        setFg(75)
+        setFg(theme.border)
         append(pad + "│  ")
-        setFg(245); setDim()
+        setFg(theme.textDim); setDim()
         let header = "← \(truncate(playlistName, to: innerW - 2))"
         append(header)
-        reset(); setFg(75)
+        reset(); setFg(theme.border)
         append(String(repeating: " ", count: max(0, boxW - 4 - header.visualWidth)))
         append("│")
         reset()
@@ -272,10 +274,10 @@ struct Screen {
         let trackRows = maxRows - 1 // one row used by header
 
         if state.playlistTracks.isEmpty {
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "Loading…", fg: 245)
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "Loading…", fg: theme.textDim, theme: theme)
             let filled = 1
             for _ in filled..<trackRows {
-                row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
             }
         } else {
             let end = min(state.playlistTracksScroll + trackRows, state.playlistTracks.count)
@@ -284,28 +286,28 @@ struct Screen {
                 let t = state.playlistTracks[i]
                 row = renderTrackLine(row: row, pad: pad, boxW: boxW, innerW: innerW,
                                       name: "\(t.name) — \(t.artist)", duration: t.duration,
-                                      selected: i == state.playlistTracksSelected)
+                                      selected: i == state.playlistTracksSelected, theme: theme)
                 rendered += 1
             }
             for _ in rendered..<trackRows {
-                row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
             }
         }
         return row
     }
 
-    private mutating func renderSearchContent(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int) -> Int {
+    private mutating func renderSearchContent(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int, theme: Theme) -> Int {
         var row = row
         let innerW = boxW - 6
 
         // Search input
         moveTo(row: row, col: 1)
-        setFg(75)
+        setFg(theme.border)
         append(pad + "│  ")
-        setFg(252)
+        setFg(theme.text)
         let prompt = "/ " + state.searchQuery + "▏"
         append(truncate(prompt, to: innerW + 2))
-        reset(); setFg(75)
+        reset(); setFg(theme.border)
         append(String(repeating: " ", count: max(0, boxW - 4 - prompt.visualWidth)))
         append("│")
         reset()
@@ -315,14 +317,14 @@ struct Screen {
 
         if state.searchResults.isEmpty {
             if !state.searchQuery.isEmpty {
-                row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "No results", fg: 245)
+                row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "No results", fg: theme.textDim, theme: theme)
                 let filled = 1
                 for _ in filled..<resultRows {
-                    row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+                    row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
                 }
             } else {
                 for _ in 0..<resultRows {
-                    row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+                    row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
                 }
             }
         } else {
@@ -331,18 +333,18 @@ struct Screen {
             for i in state.searchScroll..<end {
                 let r = state.searchResults[i]
                 moveTo(row: row, col: 1)
-                setFg(75)
+                setFg(theme.border)
                 append(pad + "│  ")
                 if i == state.searchSelected {
-                    setFg(213); setBold()
+                    setFg(theme.accent); setBold()
                     append("▸ ")
                 } else {
-                    setFg(252)
+                    setFg(theme.text)
                     append("  ")
                 }
                 let entry = "\(r.name) — \(r.artist)"
                 append(truncate(entry, to: innerW))
-                reset(); setFg(75)
+                reset(); setFg(theme.border)
                 let used = 2 + min(entry.visualWidth, innerW)
                 append(String(repeating: " ", count: max(0, innerW + 2 - used)))
                 append("│")
@@ -351,15 +353,59 @@ struct Screen {
                 rendered += 1
             }
             for _ in rendered..<resultRows {
-                row = emptyBoxLine(row: row, pad: pad, boxW: boxW)
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
             }
+        }
+        return row
+    }
+
+    private mutating func renderThemesContent(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int, theme: Theme) -> Int {
+        var row = row
+        let innerW = boxW - 6
+        let themes = Theme.allThemes
+
+        if themes.isEmpty {
+            for _ in 0..<maxRows {
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
+            }
+            return row
+        }
+
+        let end = min(state.themeScroll + maxRows, themes.count)
+        var rendered = 0
+        for i in state.themeScroll..<end {
+            let (name, _) = themes[i]
+            let isActive = name == state.themeName
+            moveTo(row: row, col: 1)
+            setFg(theme.border)
+            append(pad + "│  ")
+            if i == state.themeSelected {
+                setFg(theme.accent); setBold()
+                append("▸ ")
+            } else {
+                setFg(theme.text)
+                append("  ")
+            }
+            var label = name
+            if isActive { label += " ✓" }
+            append(truncate(label, to: innerW))
+            reset(); setFg(theme.border)
+            let used = 2 + min(label.visualWidth, innerW)
+            append(String(repeating: " ", count: max(0, innerW + 2 - used)))
+            append("│")
+            reset()
+            row += 1
+            rendered += 1
+        }
+        for _ in rendered..<maxRows {
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
         }
         return row
     }
 
     // MARK: - Help Line
 
-    private mutating func renderHelpLine(state: AppState, row: Int, pad: String, boxW: Int) -> Int {
+    private mutating func renderHelpLine(state: AppState, row: Int, pad: String, boxW: Int, theme: Theme) -> Int {
         let help: String
         switch state.activeTab {
         case .queue:
@@ -373,71 +419,73 @@ struct Screen {
             }
         case .search:
             help = "Type to search · ↑/↓ Nav · Enter Play · Esc Clear · q Quit"
+        case .themes:
+            help = "Tab Switch · ↑/↓ Nav · Enter Apply · q Quit"
         }
-        return helpBoxLine(row: row, pad: pad, boxW: boxW, text: help)
+        return helpBoxLine(row: row, pad: pad, boxW: boxW, text: help, theme: theme)
     }
 
     // MARK: - Helpers
 
     private mutating func renderTrackLine(row: Int, pad: String, boxW: Int, innerW: Int,
-                                          name: String, duration: Double, selected: Bool) -> Int {
+                                          name: String, duration: Double, selected: Bool, theme: Theme) -> Int {
         moveTo(row: row, col: 1)
-        setFg(75)
+        setFg(theme.border)
         append(pad + "│  ")
         if selected {
-            setFg(213); setBold()
+            setFg(theme.accent); setBold()
             append("▸ ")
         } else {
-            setFg(252)
+            setFg(theme.text)
             append("  ")
         }
         let dur = formatTime(duration)
         let maxNameW = innerW - dur.count - 1
         let truncEntry = truncate(name, to: max(0, maxNameW))
         append(truncEntry)
-        reset(); setFg(240)
+        reset(); setFg(theme.textMuted)
         let used = 2 + truncEntry.visualWidth
         let gap = max(1, innerW + 2 - used - dur.count)
         append(String(repeating: " ", count: gap))
         append(dur)
-        reset(); setFg(75)
+        reset(); setFg(theme.border)
         append("│")
         reset()
         return row + 1
     }
 
-    private mutating func titleBarLine(row: Int, pad: String, boxW: Int, text: String) -> Int {
+    private mutating func titleBarLine(row: Int, pad: String, boxW: Int, text: String, theme: Theme) -> Int {
         moveTo(row: row, col: 1)
-        setFg(75)
+        setFg(theme.border)
         append(pad + "│")
-        setBold(); setFg(213)
+        setBold(); setFg(theme.accent)
         append(text)
-        reset(); setFg(75)
+        reset(); setFg(theme.border)
         append(String(repeating: " ", count: max(0, boxW - 2 - text.visualWidth)))
         append("│")
         reset()
         return row + 1
     }
 
-    private mutating func separatorLine(row: Int, pad: String, boxW: Int) -> Int {
+    private mutating func separatorLine(row: Int, pad: String, boxW: Int, theme: Theme) -> Int {
         moveTo(row: row, col: 1)
-        setFg(75)
+        setFg(theme.border)
         append(pad + "├" + String(repeating: "─", count: boxW - 2) + "┤")
         reset()
         return row + 1
     }
 
-    private mutating func emptyBoxLine(row: Int, pad: String, boxW: Int) -> Int {
+    private mutating func emptyBoxLine(row: Int, pad: String, boxW: Int, theme: Theme) -> Int {
         moveTo(row: row, col: 1)
-        setFg(75)
+        setFg(theme.border)
         append(pad + "│" + String(repeating: " ", count: boxW - 2) + "│")
         reset()
         return row + 1
     }
 
-    private mutating func centeredBoxLine(row: Int, pad: String, boxW: Int, text: String, fg: Int, bold: Bool = false) -> Int {
+    private mutating func centeredBoxLine(row: Int, pad: String, boxW: Int, text: String, fg: Int, bold: Bool = false, theme: Theme) -> Int {
         moveTo(row: row, col: 1)
-        setFg(75)
+        setFg(theme.border)
         append(pad + "│")
         let textW = text.visualWidth
         let space = boxW - 2
@@ -447,30 +495,30 @@ struct Screen {
         setFg(fg)
         if bold { setBold() }
         append(text)
-        reset(); setFg(75)
+        reset(); setFg(theme.border)
         append(String(repeating: " ", count: rightSpace))
         append("│")
         reset()
         return row + 1
     }
 
-    private mutating func helpBoxLine(row: Int, pad: String, boxW: Int, text: String) -> Int {
+    private mutating func helpBoxLine(row: Int, pad: String, boxW: Int, text: String, theme: Theme) -> Int {
         moveTo(row: row, col: 1)
-        setFg(75)
+        setFg(theme.border)
         append(pad + "│  ")
-        setDim(); setFg(245)
+        setDim(); setFg(theme.textDim)
         let t = truncate(text, to: boxW - 6)
         append(t)
-        reset(); setFg(75)
+        reset(); setFg(theme.border)
         append(String(repeating: " ", count: max(0, boxW - 4 - t.visualWidth)))
         append("│")
         reset()
         return row + 1
     }
 
-    private mutating func renderProgressBar(row: Int, pad: String, boxW: Int, position: Double, duration: Double) -> Int {
+    private mutating func renderProgressBar(row: Int, pad: String, boxW: Int, position: Double, duration: Double, theme: Theme) -> Int {
         moveTo(row: row, col: 1)
-        setFg(75)
+        setFg(theme.border)
         append(pad + "│  ")
 
         let timeStr = "  \(formatTime(position)) / \(formatTime(duration))  "
@@ -479,13 +527,13 @@ struct Screen {
         let filled = Int(Double(barMax) * progress)
         let empty = barMax - filled
 
-        setFg(213)
+        setFg(theme.accent)
         append(String(repeating: "━", count: max(0, filled)))
-        setFg(240)
+        setFg(theme.textMuted)
         append(String(repeating: "─", count: max(0, empty)))
-        setFg(249)
+        setFg(theme.timeText)
         append(timeStr)
-        reset(); setFg(75)
+        reset(); setFg(theme.border)
         append("│")
         reset()
         return row + 1

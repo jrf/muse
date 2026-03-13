@@ -44,7 +44,7 @@ struct PlaylistTrack: Sendable {
 }
 
 enum Tab: Sendable {
-    case queue, library, search
+    case queue, library, search, themes
 }
 
 enum LibrarySubView: Sendable {
@@ -84,4 +84,9 @@ struct AppState: Sendable {
     var searchResults: [(name: String, artist: String, album: String)] = []
     var searchSelected: Int = 0
     var searchScroll: Int = 0
+
+    // Themes tab
+    var themeName: String = "synthwave"
+    var themeSelected: Int = 0
+    var themeScroll: Int = 0
 }
