@@ -3,21 +3,11 @@ import Foundation
 struct MusicController: Sendable {
 
     private func runAppleScript(_ script: String) -> String? {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            return output?.isEmpty == true ? nil : output
-        } catch {
-            return nil
-        }
+        let appleScript = NSAppleScript(source: script)
+        var error: NSDictionary?
+        guard let result = appleScript?.executeAndReturnError(&error) else { return nil }
+        let output = result.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return output?.isEmpty == true ? nil : output
     }
 
     func isRunning() -> Bool {

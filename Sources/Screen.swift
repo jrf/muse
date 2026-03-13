@@ -32,8 +32,9 @@ struct Screen {
     }
 
     func flush(to terminal: Terminal) {
-        terminal.write("\u{1B}[2J\u{1B}[H") // clear screen + home
+        terminal.write("\u{1B}[H")   // cursor home
         terminal.write(buffer)
+        terminal.write("\u{1B}[J")   // clear from cursor to end of screen
     }
 
     // MARK: - Main Renderer
@@ -362,13 +363,13 @@ struct Screen {
         let help: String
         switch state.activeTab {
         case .queue:
-            help = "1/2/3 Tabs · ↑/↓ Nav · Enter Play · space Pause · q Quit"
+            help = "Tab Switch · ↑/↓ Nav · Enter Play · space Pause · q Quit"
         case .library:
             switch state.librarySubView {
             case .playlists:
-                help = "1/2/3 Tabs · ↑/↓ Nav · Enter Browse · space Pause · q Quit"
+                help = "Tab Switch · ↑/↓ Nav · Enter Browse · space Pause · q Quit"
             case .tracks:
-                help = "1/2/3 Tabs · ↑/↓ Nav · Enter Play · Esc Back · q Quit"
+                help = "Tab Switch · ↑/↓ Nav · Enter Play · Esc Back · q Quit"
             }
         case .search:
             help = "Type to search · ↑/↓ Nav · Enter Play · Esc Clear · q Quit"

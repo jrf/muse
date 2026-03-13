@@ -3,7 +3,7 @@ import Darwin
 enum Key {
     case character(Character)
     case up, down, left, right
-    case enter, escape, backspace, delete, tab
+    case enter, escape, backspace, delete, tab, shiftTab
     case space
 }
 
@@ -67,6 +67,7 @@ final class Terminal {
                 case 66: return .down
                 case 67: return .right
                 case 68: return .left
+                case 90: return .shiftTab
                 default: return .escape
                 }
             }

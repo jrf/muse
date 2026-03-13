@@ -1,13 +1,16 @@
 import Foundation
 import Darwin
 
+private nonisolated(unsafe) var sigwinchReceived: sig_atomic_t = 0
+
 final class App: @unchecked Sendable {
     private let terminal = Terminal()
     private let music = MusicController()
     private var state = AppState()
     private var running = true
     private var lastRefresh: Date = .distantPast
-    private let refreshInterval: TimeInterval = 1.0
+    private let refreshInterval: TimeInterval = 2.0
+    private var lastPositionUpdate: Date = Date()
     private var refreshInFlight = false
     private let refreshQueue = DispatchQueue(label: "muse.refresh")
     private var pendingState: AppState?
@@ -22,6 +25,7 @@ final class App: @unchecked Sendable {
         }
 
         signal(SIGINT, SIG_IGN)
+        signal(SIGWINCH) { _ in sigwinchReceived = 1 }
 
         // Initial state fetch (blocking for first render)
         applyFresh(music.fetchFullState())
@@ -34,12 +38,25 @@ final class App: @unchecked Sendable {
             stateLock.unlock()
         }
 
+        // Register for Music.app distributed notifications
+        let nc = DistributedNotificationCenter.default()
+        nc.addObserver(forName: Notification.Name("com.apple.Music.playerInfo"),
+                       object: nil, queue: nil) { [weak self] notification in
+            self?.handleMusicNotification(notification)
+        }
+        nc.addObserver(forName: Notification.Name("com.apple.iTunes.playerInfo"),
+                       object: nil, queue: nil) { [weak self] notification in
+            self?.handleMusicNotification(notification)
+        }
+
         render()
 
         while running {
+            // Pump RunLoop to process distributed notifications
+            RunLoop.current.run(mode: .default, before: Date())
+
             if let key = terminal.readKey() {
                 handleKey(key)
-                render()
             }
 
             // Apply async refresh result if available
@@ -48,10 +65,18 @@ final class App: @unchecked Sendable {
                 pendingState = nil
                 stateLock.unlock()
                 applyFresh(fresh)
-                render()
             } else {
                 stateLock.unlock()
             }
+
+            // Full clear on terminal resize to remove stale content
+            if sigwinchReceived != 0 {
+                sigwinchReceived = 0
+                terminal.clearScreen()
+            }
+
+            // Always render for smooth progress interpolation
+            render()
 
             // Kick off async refresh if needed
             let now = Date()
@@ -76,6 +101,7 @@ final class App: @unchecked Sendable {
         state.volume = fresh.volume
         state.shuffleEnabled = fresh.shuffleEnabled
         state.repeatMode = fresh.repeatMode
+        lastPositionUpdate = Date()
     }
 
     // MARK: - Key Handling
@@ -101,22 +127,25 @@ final class App: @unchecked Sendable {
         case .character("q"):
             running = false
             return true
-        case .character("1"):
-            state.activeTab = .queue
-            return true
-        case .character("2"):
-            if !inSearch {
-                state.activeTab = .library
-                return true
+        case .tab:
+            switch state.activeTab {
+            case .queue: state.activeTab = .library
+            case .library: state.activeTab = .search
+            case .search: state.activeTab = .queue
             }
+            return true
+        case .shiftTab:
+            switch state.activeTab {
+            case .queue: state.activeTab = .search
+            case .library: state.activeTab = .queue
+            case .search: state.activeTab = .library
+            }
+            return true
         case .character("l"):
             if !inSearch {
                 state.activeTab = .library
                 return true
             }
-        case .character("3"):
-            state.activeTab = .search
-            return true
         case .character("/"):
             state.activeTab = .search
             return true
@@ -343,9 +372,54 @@ final class App: @unchecked Sendable {
 
     private func render() {
         let size = terminal.getSize()
+        var displayState = state
+        // Interpolate progress position when playing
+        if state.playerState == .playing, let track = state.track {
+            let elapsed = Date().timeIntervalSince(lastPositionUpdate)
+            displayState.track?.position = min(track.position + elapsed, track.duration)
+        }
         var screen = Screen()
-        screen.renderMain(state: state, width: size.width, height: size.height)
+        screen.renderMain(state: displayState, width: size.width, height: size.height)
         screen.flush(to: terminal)
+    }
+
+    // MARK: - Music Notifications
+
+    private func handleMusicNotification(_ notification: Notification) {
+        guard let info = notification.userInfo else { return }
+
+        if let stateStr = info["Player State"] as? String {
+            switch stateStr {
+            case "Playing": state.playerState = .playing
+            case "Paused": state.playerState = .paused
+            case "Stopped":
+                state.playerState = .stopped
+                state.track = nil
+            default: break
+            }
+        }
+
+        if let name = info["Name"] as? String {
+            let artist = info["Artist"] as? String ?? ""
+            let album = info["Album"] as? String ?? ""
+            let totalTimeMs = info["Total Time"] as? Double ?? 0
+            let duration = totalTimeMs / 1000.0
+            let isNewTrack = state.track?.name != name || state.track?.artist != artist
+
+            state.track = Track(
+                name: name,
+                artist: artist,
+                album: album,
+                duration: duration,
+                position: isNewTrack ? 0 : (state.track?.position ?? 0)
+            )
+
+            if isNewTrack {
+                lastPositionUpdate = Date()
+            }
+        }
+
+        state.musicRunning = true
     }
 
     // MARK: - Helpers
