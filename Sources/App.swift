@@ -127,20 +127,23 @@ final class App: @unchecked Sendable {
         if lyricsKey != state.lyricsTrackKey {
             state.lyricsTrackKey = lyricsKey
             state.lyricsScroll = 0
+            state.lyricsManualScroll = false
             if lyricsKey.isEmpty {
                 state.lyricsText = ""
                 state.lyricsLines = []
+                state.lyricsSynced = false
             } else {
                 let trackName = state.track!.name
                 let trackArtist = state.track!.artist
                 refreshQueue.async { [self] in
-                    let text = music.getLyrics(trackName: trackName, artist: trackArtist) ?? ""
-                    let lines = text.isEmpty ? [] : text.components(separatedBy: "\n")
+                    let result = music.getLyrics(trackName: trackName, artist: trackArtist)
                     stateLock.lock()
                     if state.lyricsTrackKey == lyricsKey {
-                        state.lyricsText = text
-                        state.lyricsLines = lines
+                        state.lyricsLines = result?.lines ?? []
+                        state.lyricsSynced = result?.synced ?? false
+                        state.lyricsText = result?.lines.map(\.text).joined(separator: "\n") ?? ""
                         state.lyricsScroll = 0
+                        state.lyricsManualScroll = false
                     }
                     stateLock.unlock()
                 }
@@ -467,12 +470,17 @@ final class App: @unchecked Sendable {
         case .up:
             if state.lyricsScroll > 0 {
                 state.lyricsScroll -= 1
+                state.lyricsManualScroll = true
             }
         case .down:
             let maxVisible = contentRows()
             if state.lyricsScroll < max(0, state.lyricsLines.count - maxVisible) {
                 state.lyricsScroll += 1
+                state.lyricsManualScroll = true
             }
+        case .character("0"):
+            // Reset to auto-scroll
+            state.lyricsManualScroll = false
         default:
             break
         }
@@ -611,14 +619,16 @@ final class App: @unchecked Sendable {
                 let lyricsKey = "\(name)\t\(artist)"
                 state.lyricsTrackKey = lyricsKey
                 state.lyricsScroll = 0
+                state.lyricsManualScroll = false
                 refreshQueue.async { [self] in
-                    let text = music.getLyrics(trackName: name, artist: artist) ?? ""
-                    let lines = text.isEmpty ? [] : text.components(separatedBy: "\n")
+                    let result = music.getLyrics(trackName: name, artist: artist)
                     stateLock.lock()
                     if state.lyricsTrackKey == lyricsKey {
-                        state.lyricsText = text
-                        state.lyricsLines = lines
+                        state.lyricsLines = result?.lines ?? []
+                        state.lyricsSynced = result?.synced ?? false
+                        state.lyricsText = result?.lines.map(\.text).joined(separator: "\n") ?? ""
                         state.lyricsScroll = 0
+                        state.lyricsManualScroll = false
                     }
                     stateLock.unlock()
                 }

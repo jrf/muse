@@ -87,8 +87,10 @@ struct AppState: Sendable {
 
     // Lyrics tab
     var lyricsText: String = ""
-    var lyricsLines: [String] = []
+    var lyricsLines: [(time: Double?, text: String)] = []  // parsed lines with optional timestamp
+    var lyricsSynced: Bool = false  // true if timestamps are available
     var lyricsScroll: Int = 0
+    var lyricsManualScroll: Bool = false  // user overrode auto-scroll
     var lyricsTrackKey: String = ""
 
     // Themes tab

@@ -231,7 +231,12 @@ struct MusicController: Sendable {
         _ = runAppleScript(script)
     }
 
-    func getLyrics(trackName: String, artist: String) -> String? {
+    struct LyricsResult: Sendable {
+        var lines: [(time: Double?, text: String)]
+        var synced: Bool
+    }
+
+    func getLyrics(trackName: String, artist: String) -> LyricsResult? {
         // First try embedded lyrics via AppleScript
         let script = """
         tell application "Music"
@@ -245,7 +250,8 @@ struct MusicController: Sendable {
         end tell
         """
         if let embedded = runAppleScript(script), !embedded.isEmpty {
-            return embedded
+            let lines = embedded.components(separatedBy: "\n").map { (time: nil as Double?, text: $0) }
+            return LyricsResult(lines: lines, synced: false)
         }
 
         // Fall back to LRCLIB API
@@ -263,21 +269,35 @@ struct MusicController: Sendable {
         guard let (data, _) = try? synchronousDataTask(request) else { return nil }
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
 
-        // Prefer plain lyrics over synced (synced has timestamps)
-        if let plain = json["plainLyrics"] as? String, !plain.isEmpty {
-            return plain
-        } else if let synced = json["syncedLyrics"] as? String, !synced.isEmpty {
-            // Strip timestamp prefixes like "[00:12.34] "
-            let lines = synced.components(separatedBy: "\n").map { line -> String in
-                if line.hasPrefix("["), let bracket = line.firstIndex(of: "]") {
-                    let after = line.index(after: bracket)
-                    return String(line[after...]).trimmingCharacters(in: .whitespaces)
-                }
-                return line
-            }
-            return lines.joined(separator: "\n")
+        // Prefer synced lyrics (has timestamps for auto-scroll)
+        if let synced = json["syncedLyrics"] as? String, !synced.isEmpty {
+            let lines = parseSyncedLyrics(synced)
+            return LyricsResult(lines: lines, synced: true)
+        } else if let plain = json["plainLyrics"] as? String, !plain.isEmpty {
+            let lines = plain.components(separatedBy: "\n").map { (time: nil as Double?, text: $0) }
+            return LyricsResult(lines: lines, synced: false)
         }
         return nil
+    }
+
+    private func parseSyncedLyrics(_ raw: String) -> [(time: Double?, text: String)] {
+        return raw.components(separatedBy: "\n").map { line in
+            // Format: [mm:ss.xx] text
+            guard line.hasPrefix("["), let bracket = line.firstIndex(of: "]") else {
+                return (time: nil, text: line)
+            }
+            let timeStr = String(line[line.index(after: line.startIndex)..<bracket])
+            let after = line.index(after: bracket)
+            let text = String(line[after...]).trimmingCharacters(in: .whitespaces)
+            // Parse mm:ss.xx
+            let parts = timeStr.split(separator: ":")
+            guard parts.count == 2,
+                  let minutes = Double(parts[0]),
+                  let seconds = Double(parts[1]) else {
+                return (time: nil, text: text)
+            }
+            return (time: minutes * 60.0 + seconds, text: text)
+        }
     }
 
     private func synchronousDataTask(_ request: URLRequest) throws -> (Data, URLResponse) {

@@ -84,7 +84,7 @@ struct Screen {
 
         // Tab content — fills remaining height
         // Reserve 3 rows for footer (separator + help + bottom border)
-        let contentRows = max(3, height - row - 2)
+        let contentRows = max(3, height - row - 3)
         row = renderTabContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: contentRows, theme: theme)
 
         // Separator
@@ -559,10 +559,10 @@ struct Screen {
 
     private mutating func renderLyricsContent(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int, theme: Theme) -> Int {
         var row = row
+        var state = state
         let innerW = boxW - 4
 
         if state.lyricsLines.isEmpty {
-            // Center "No lyrics available" vertically
             let topPad = max(0, (maxRows - 1) / 2)
             for _ in 0..<topPad {
                 row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
@@ -572,26 +572,53 @@ struct Screen {
             for _ in filled..<maxRows {
                 row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
             }
-        } else {
-            let end = min(state.lyricsScroll + maxRows, state.lyricsLines.count)
-            var rendered = 0
-            for i in state.lyricsScroll..<end {
-                moveTo(row: row, col: 1)
-                setFg(theme.border)
-                append(pad + "│ ")
+            return row
+        }
+
+        // Find current line index for synced lyrics
+        var currentLineIdx = -1
+        if state.lyricsSynced, let position = state.track?.position {
+            for (i, line) in state.lyricsLines.enumerated().reversed() {
+                if let t = line.time, t <= position {
+                    currentLineIdx = i
+                    break
+                }
+            }
+        }
+
+        // Auto-scroll: center current line in view
+        if state.lyricsSynced && !state.lyricsManualScroll && currentLineIdx >= 0 {
+            let targetScroll = max(0, min(currentLineIdx - maxRows / 2,
+                                          state.lyricsLines.count - maxRows))
+            state.lyricsScroll = max(0, targetScroll)
+        }
+
+        let end = min(state.lyricsScroll + maxRows, state.lyricsLines.count)
+        var rendered = 0
+        for i in state.lyricsScroll..<end {
+            let lineText = state.lyricsLines[i].text
+            let isCurrent = i == currentLineIdx
+            moveTo(row: row, col: 1)
+            setFg(theme.border)
+            append(pad + "│ ")
+            if isCurrent {
+                setFg(theme.accent); setBold()
+            } else if state.lyricsSynced && currentLineIdx >= 0 {
+                setFg(theme.textDim)
+            } else {
                 setFg(theme.text)
-                let line = truncate(state.lyricsLines[i], to: innerW)
-                append(line)
-                reset(); setFg(theme.border)
-                append(String(repeating: " ", count: max(0, innerW - line.visualWidth)))
-                append(" │")
-                reset()
-                row += 1
-                rendered += 1
             }
-            for _ in rendered..<maxRows {
-                row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
-            }
+            let line = truncate(lineText, to: innerW)
+            append(line)
+            reset(); setFg(theme.border)
+            append(String(repeating: " ", count: max(0, innerW - line.visualWidth)))
+            append(" │")
+            reset()
+            row += 1
+            rendered += 1
+        }
+        for _ in rendered..<maxRows {
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
         }
         return row
     }
