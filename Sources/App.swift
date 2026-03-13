@@ -23,6 +23,7 @@ final class App: @unchecked Sendable {
     private var artworkCacheKey = ""
     private var pendingArtwork: SixelArt.ArtworkCache?
     private var artworkInFlight = false
+    private var autoAdvancePending = false
 
     func run() {
         terminal.enableRawMode()
@@ -484,11 +485,14 @@ final class App: @unchecked Sendable {
 
         if let stateStr = info["Player State"] as? String {
             switch stateStr {
-            case "Playing": state.playerState = .playing
+            case "Playing":
+                state.playerState = .playing
+                autoAdvancePending = false
             case "Paused": state.playerState = .paused
             case "Stopped":
                 state.playerState = .stopped
                 state.track = nil
+                autoAdvanceQueue()
             default: break
             }
         }
@@ -518,6 +522,28 @@ final class App: @unchecked Sendable {
         }
 
         state.musicRunning = true
+    }
+
+    // MARK: - Auto-Advance Queue
+
+    private func autoAdvanceQueue() {
+        guard !state.queueTracks.isEmpty,
+              state.queueSelected + 1 < state.queueTracks.count else { return }
+        // Debounce: only advance if still stopped after a short delay.
+        // This avoids cascading when playTrackInPlaylist triggers a brief "Stopped".
+        autoAdvancePending = true
+        refreshQueue.asyncAfter(deadline: .now() + 1.5) { [self] in
+            guard autoAdvancePending else { return }
+            autoAdvancePending = false
+            let nextIdx = state.queueSelected + 1
+            state.queueSelected = nextIdx
+            let playlist = state.queuePlaylistName
+            music.playTrackInPlaylist(playlist, trackIndex: nextIdx)
+            let fresh = music.fetchFullState()
+            stateLock.lock()
+            pendingState = fresh
+            stateLock.unlock()
+        }
     }
 
     // MARK: - Helpers

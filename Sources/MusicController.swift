@@ -218,13 +218,13 @@ struct MusicController: Sendable {
 
     func playTrack(_ name: String, artist: String) {
         let escapedName = name.replacingOccurrences(of: "\"", with: "\\\"")
+        // For search results, just play the track directly.
+        // This won't set up a queue, but skipping through a large library is too slow.
         let script = """
         tell application "Music"
             set results to (search playlist "Library" for "\(escapedName)")
             if (count of results) > 0 then
-                play playlist "Library"
-                set idx to index of item 1 of results
-                play track idx of playlist "Library"
+                play item 1 of results
             end if
         end tell
         """
