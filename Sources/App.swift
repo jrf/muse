@@ -327,6 +327,18 @@ final class App: @unchecked Sendable {
                 state.playlistPickerScroll = 0
                 return true
             }
+        case .character("o"):
+            if !inSearch, let artist = state.track?.artist, !artist.isEmpty {
+                refreshQueue.async { [self] in music.revealArtistInMusic(artist) }
+                return true
+            }
+        case .character("O"):
+            if !inSearch, let track = state.track, !track.album.isEmpty {
+                let album = track.album
+                let artist = track.artist
+                refreshQueue.async { [self] in music.revealAlbumInMusic(album: album, artist: artist) }
+                return true
+            }
         case .character("A"):
             if let album = state.track?.album, !album.isEmpty {
                 state.activeTab = .search

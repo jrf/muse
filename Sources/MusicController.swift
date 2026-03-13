@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 struct MusicController: Sendable {
@@ -337,6 +338,47 @@ struct MusicController: Sendable {
                     set loved of current track to not (loved of current track)
                 end try
             end if
+        end tell
+        """
+        _ = runAppleScript(script)
+    }
+
+    func revealArtistInMusic(_ artist: String) {
+        if let url = iTunesSearchURL(term: artist, entity: "musicArtist") {
+            NSWorkspace.shared.open(url)
+        } else {
+            revealCurrentTrack()
+        }
+    }
+
+    func revealAlbumInMusic(album: String, artist: String) {
+        if let url = iTunesSearchURL(term: "\(album) \(artist)", entity: "album") {
+            NSWorkspace.shared.open(url)
+        } else {
+            revealCurrentTrack()
+        }
+    }
+
+    private func iTunesSearchURL(term: String, entity: String) -> URL? {
+        guard let encoded = term.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let searchURL = URL(string: "https://itunes.apple.com/search?term=\(encoded)&entity=\(entity)&limit=1"),
+              let (data, _) = try? synchronousDataTask(URLRequest(url: searchURL)),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let results = json["results"] as? [[String: Any]],
+              let first = results.first else { return nil }
+        let urlKey = entity == "musicArtist" ? "artistLinkUrl" : "collectionViewUrl"
+        guard let urlString = first[urlKey] as? String,
+              var components = URLComponents(string: urlString) else { return nil }
+        // Strip affiliate query params so Music.app opens the full page
+        components.queryItems = nil
+        return components.url
+    }
+
+    private func revealCurrentTrack() {
+        let script = """
+        tell application "Music"
+            reveal current track
+            activate
         end tell
         """
         _ = runAppleScript(script)

@@ -310,6 +310,8 @@ struct Screen {
             ("P", "Add to playlist"),
             ("a", "Search artist"),
             ("A", "Search album"),
+            ("o", "Open artist in Music"),
+            ("O", "Open album in Music"),
             ("L", "Lyrics tab"),
             ("\u{2191} / \u{2193}", "Navigate list"),
             ("Enter", "Play / Browse"),

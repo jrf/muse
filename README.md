@@ -8,7 +8,9 @@ A terminal UI for controlling Apple Music on macOS.
 
 - Full playback control (play/pause, next/previous, volume, shuffle, repeat)
 - Browse playlists and search your library
+- Favorite tracks and add them to playlists
 - Jump to the current track's artist or album with a single key
+- Open the artist page or full album directly in Music.app
 - Queue management with auto-advance
 - Lyrics display fetched from LRCLIB (with embedded lyrics fallback)
 - Album art display via sixel graphics in supported terminals
@@ -55,8 +57,12 @@ Launch `muse` in any terminal. The player panel at the top always shows the curr
 | `s` | Toggle shuffle |
 | `r` | Cycle repeat (off → all → one) |
 | `C` | Clear queue |
+| `f` | Toggle favorite |
+| `P` | Add to playlist |
 | `a` | Search current track's artist |
 | `A` | Search current track's album |
+| `o` | Open artist in Music.app |
+| `O` | Open album in Music.app |
 | `↑` / `↓` | Navigate list / Scroll lyrics |
 | `Enter` | Play track / Browse playlist |
 | `Backspace` | Back (library) / Clear (search) |
