@@ -8,6 +8,8 @@ A terminal UI for controlling Apple Music on macOS.
 
 - Full playback control (play/pause, next/previous, volume, shuffle, repeat)
 - Browse playlists and search your library
+- Jump to the current track's artist or album with a single key
+- Queue management with auto-advance
 - Album art display via sixel graphics in supported terminals
 - Customizable color themes
 
@@ -50,19 +52,23 @@ Launch `muse` in any terminal. The player panel at the top always shows the curr
 | `-` | Volume down |
 | `s` | Toggle shuffle |
 | `r` | Cycle repeat (off → all → one) |
+| `C` | Clear queue |
+| `a` | Search current track's artist |
+| `A` | Search current track's album |
 | `↑` / `↓` | Navigate list |
 | `Enter` | Play track / Browse playlist |
 | `Backspace` | Back (library) / Clear (search) |
+| `?` | Toggle help overlay |
 | `q` | Quit |
 
 ### Tabs
 
-- **Queue** — tracks from the last playlist you played. Select a track and press Enter to jump to it.
+- **Queue** — tracks from the last playlist you played. Select a track and press Enter to jump to it. Tracks auto-advance when the current one finishes.
 - **Library** — browse your playlists. Press Enter to see tracks, Enter again to play. Backspace goes back to the playlist list.
 - **Search** — type to search your library. Results appear as you type (minimum 2 characters). Enter plays the selected result.
 - **Themes** — select a color theme. Press Enter to apply.
 
-Playback controls (`space`, `n`, `p`, `+`/`-`, `s`, `r`) work from any tab. In the Search tab, letter keys are captured for typing, so `n`/`p`/`s`/`r` only work as playback controls from the other tabs.
+Playback controls (`space`, `n`, `p`, `+`/`-`, `s`, `r`) work from any tab. In the Search tab, letter keys are captured for typing, so `n`/`p`/`s`/`r`/`a` only work as playback controls from the other tabs.
 
 ### Album Art
 
