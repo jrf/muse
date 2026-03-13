@@ -270,6 +270,9 @@ struct Screen {
     // MARK: - Tab Content
 
     private mutating func renderTabContent(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int, theme: Theme) -> Int {
+        if state.showHelp {
+            return renderHelpOverlay(row: row, pad: pad, boxW: boxW, maxRows: maxRows, theme: theme)
+        }
         switch state.activeTab {
         case .queue:
             return renderQueueContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows, theme: theme)
@@ -280,6 +283,87 @@ struct Screen {
         case .themes:
             return renderThemesContent(state: state, row: row, pad: pad, boxW: boxW, maxRows: maxRows, theme: theme)
         }
+    }
+
+    private mutating func renderHelpOverlay(row: Int, pad: String, boxW: Int, maxRows: Int, theme: Theme) -> Int {
+        var row = row
+        let lines: [(key: String, desc: String)] = [
+            ("Tab / Shift+Tab", "Cycle tabs"),
+            ("l", "Library tab"),
+            ("/", "Search tab"),
+            ("space", "Play / Pause"),
+            ("n", "Next track"),
+            ("p", "Previous track"),
+            ("+ / =", "Volume up"),
+            ("-", "Volume down"),
+            ("s", "Toggle shuffle"),
+            ("r", "Cycle repeat"),
+            ("C", "Clear queue"),
+            ("\u{2191} / \u{2193}", "Navigate list"),
+            ("Enter", "Play / Browse"),
+            ("Backspace", "Back / Clear"),
+            ("?", "Toggle help"),
+            ("q", "Quit"),
+        ]
+
+        let innerW = boxW - 4
+        let keyColW = 20
+        let headerText = "Keybindings"
+
+        // Center content vertically
+        let contentH = lines.count + 2 // 1 blank + header + lines
+        let topPad = max(0, (maxRows - contentH) / 2)
+
+        var rendered = 0
+
+        // Top padding
+        for _ in 0..<topPad {
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
+            rendered += 1
+        }
+
+        // Header
+        if rendered < maxRows {
+            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: headerText, fg: theme.accent, bold: true, theme: theme)
+            rendered += 1
+        }
+
+        // Blank line after header
+        if rendered < maxRows {
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
+            rendered += 1
+        }
+
+        // Keybinding lines
+        let contentLeft = max(0, (innerW - keyColW - 20) / 2)
+        for binding in lines {
+            guard rendered < maxRows else { break }
+            moveTo(row: row, col: 1)
+            setFg(theme.border)
+            append(pad + "│ ")
+            append(String(repeating: " ", count: contentLeft))
+            setFg(theme.textBright); setBold()
+            let keyStr = binding.key
+            append(keyStr)
+            reset()
+            let keyPad = max(1, keyColW - keyStr.visualWidth)
+            append(String(repeating: " ", count: keyPad))
+            setFg(theme.text)
+            append(binding.desc)
+            reset(); setFg(theme.border)
+            let used = contentLeft + keyStr.visualWidth + keyPad + binding.desc.visualWidth
+            append(String(repeating: " ", count: max(0, innerW - used)))
+            append(" │")
+            reset()
+            row += 1
+            rendered += 1
+        }
+
+        // Fill remaining rows
+        for _ in rendered..<maxRows {
+            row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
+        }
+        return row
     }
 
     private mutating func renderQueueContent(state: AppState, row: Int, pad: String, boxW: Int, maxRows: Int, theme: Theme) -> Int {
@@ -515,23 +599,7 @@ struct Screen {
     // MARK: - Help Line
 
     private mutating func renderHelpLine(state: AppState, row: Int, pad: String, boxW: Int, theme: Theme) -> Int {
-        let help: String
-        switch state.activeTab {
-        case .queue:
-            help = "Tab Switch · ↑/↓ Nav · Enter Play · space Pause · q Quit"
-        case .library:
-            switch state.librarySubView {
-            case .playlists:
-                help = "Tab Switch · ↑/↓ Nav · Enter Browse · space Pause · q Quit"
-            case .tracks:
-                help = "Tab Switch · ↑/↓ Nav · Enter Play · Backspace Back · q Quit"
-            }
-        case .search:
-            help = "Type to search · ↑/↓ Nav · Enter Play · Backspace Clear · q Quit"
-        case .themes:
-            help = "Tab Switch · ↑/↓ Nav · Enter Apply · q Quit"
-        }
-        return helpBoxLine(row: row, pad: pad, boxW: boxW, text: help, theme: theme)
+        return helpBoxLine(row: row, pad: pad, boxW: boxW, text: "? Help · q Quit", theme: theme)
     }
 
     // MARK: - Helpers

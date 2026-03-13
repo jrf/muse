@@ -89,4 +89,7 @@ struct AppState: Sendable {
     var themeName: String = "synthwave"
     var themeSelected: Int = 0
     var themeScroll: Int = 0
+
+    // Help overlay
+    var showHelp: Bool = false
 }

@@ -142,6 +142,16 @@ final class App: @unchecked Sendable {
 
     /// Returns true if the key was consumed globally.
     private func handleGlobalKey(_ key: Key) -> Bool {
+        // Help overlay: toggle on "?", dismiss on any other key
+        if case .character("?") = key {
+            state.showHelp.toggle()
+            return true
+        }
+        if state.showHelp {
+            state.showHelp = false
+            return true
+        }
+
         let inSearch = state.activeTab == .search
 
         switch key {
@@ -196,6 +206,14 @@ final class App: @unchecked Sendable {
                 state.volume = max(0, state.volume - 5)
                 let vol = state.volume
                 refreshQueue.async { [self] in music.setVolume(vol) }
+                return true
+            }
+        case .character("C"):
+            if !inSearch {
+                state.queueTracks = []
+                state.queueSelected = 0
+                state.queueScroll = 0
+                state.queuePlaylistName = ""
                 return true
             }
         case .character("s"):
