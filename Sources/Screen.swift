@@ -2,9 +2,11 @@ import Foundation
 
 struct Screen {
     private var buffer = ""
+    private var sixelOutput: (row: Int, col: Int, data: String)?
 
     mutating func clear() {
         buffer = ""
+        sixelOutput = nil
     }
 
     mutating func append(_ text: String) {
@@ -31,15 +33,24 @@ struct Screen {
         buffer += "\u{1B}[0m"
     }
 
+    mutating func setSixel(row: Int, col: Int, data: String) {
+        sixelOutput = (row: row, col: col, data: data)
+    }
+
     func flush(to terminal: Terminal) {
         terminal.write("\u{1B}[H")   // cursor home
         terminal.write(buffer)
         terminal.write("\u{1B}[J")   // clear from cursor to end of screen
+        // Write sixel after clear so it doesn't get wiped
+        if let sixel = sixelOutput {
+            terminal.write("\u{1B}[\(sixel.row);\(sixel.col)H")
+            terminal.write(sixel.data)
+        }
     }
 
     // MARK: - Main Renderer
 
-    mutating func renderMain(state: AppState, width: Int, height: Int, theme: Theme) {
+    mutating func renderMain(state: AppState, width: Int, height: Int, theme: Theme, artwork: SixelArt.ArtworkCache? = nil) {
         let boxW = min(width - 2, 80)
         let leftPad = max(0, (width - boxW) / 2)
         let pad = String(repeating: " ", count: leftPad)
@@ -60,7 +71,7 @@ struct Screen {
         row = separatorLine(row: row, pad: pad, boxW: boxW, theme: theme)
 
         // Player section
-        row = renderPlayerSection(state: state, row: row, pad: pad, boxW: boxW, theme: theme)
+        row = renderPlayerSection(state: state, row: row, pad: pad, boxW: boxW, theme: theme, artwork: artwork)
 
         // Separator
         row = separatorLine(row: row, pad: pad, boxW: boxW, theme: theme)
@@ -91,9 +102,14 @@ struct Screen {
 
     // MARK: - Player Section
 
-    private mutating func renderPlayerSection(state: AppState, row: Int, pad: String, boxW: Int, theme: Theme) -> Int {
+    private mutating func renderPlayerSection(state: AppState, row: Int, pad: String, boxW: Int, theme: Theme, artwork: SixelArt.ArtworkCache? = nil) -> Int {
         var row = row
         let innerW = boxW - 4
+
+        // Check if we have usable artwork
+        let hasArt = artwork.map { !$0.sixelString.isEmpty && $0.cellCols > 0 } ?? false
+        let artCols = hasArt ? artwork!.cellCols : 0
+        let artRows = hasArt ? artwork!.cellRows : 0
 
         if !state.musicRunning {
             row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
@@ -101,20 +117,113 @@ struct Screen {
             row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "Open Music.app to get started", fg: theme.textDim, theme: theme)
             row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
         } else if let track = state.track {
-            row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(track.name, to: innerW), fg: theme.textBright, bold: true, theme: theme)
-            let subtitle = "\(track.artist) — \(track.album)"
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(subtitle, to: innerW), fg: theme.timeText, theme: theme)
-            row = renderProgressBar(row: row, pad: pad, boxW: boxW, position: track.position, duration: track.duration, theme: theme)
+            if hasArt && boxW >= artCols + 30 {
+                // Side-by-side layout: artwork on left, text on right
+                let artColWidth = artCols + 2  // artwork + padding
+                let textW = innerW - artColWidth
+                let startRow = row
 
-            // Controls line
-            let playIcon = state.playerState == .playing ? "▐▐" : " ▶"
-            let shuffleStr = state.shuffleEnabled ? "⤮ on " : "⤮ off"
-            let repeatStr = "⟳ \(state.repeatMode.label)"
-            let volStr = "Vol: \(state.volume)%"
-            let controls = " ◂◂  \(playIcon)  ▸▸      \(shuffleStr)  \(repeatStr)   \(volStr) "
-            row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(controls, to: innerW), fg: theme.text, theme: theme)
-            row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
+                // Text lines to render on the right
+                let trackName = truncate(track.name, to: textW)
+                let subtitle = truncate("\(track.artist) — \(track.album)", to: textW)
+                let playIcon = state.playerState == .playing ? "▐▐" : " ▶"
+                let shuffleStr = state.shuffleEnabled ? "⤮ on " : "⤮ off"
+                let repeatStr = "⟳ \(state.repeatMode.label)"
+                let volStr = "Vol: \(state.volume)%"
+                let controls = truncate(" ◂◂  \(playIcon)  ▸▸   \(shuffleStr)  \(repeatStr)  \(volStr) ", to: textW)
+
+                // Progress bar components
+                let timeStr = "  \(formatTime(track.position)) / \(formatTime(track.duration))  "
+                let barMax = max(0, textW - timeStr.count)
+                let progress = track.duration > 0 ? min(1.0, track.position / track.duration) : 0
+                let filled = Int(Double(barMax) * progress)
+                let empty = barMax - filled
+
+                // Total rows needed: 1 empty + text lines (4) + 1 empty = 6, or artRows+2, whichever is larger
+                let textContentRows = 4  // name, subtitle, progress, controls
+                let totalRows = max(textContentRows + 2, artRows + 2)
+                let textStartOffset = max(0, (totalRows - textContentRows) / 2 - 1) // center text vertically
+                let artStartOffset = max(0, (totalRows - artRows) / 2) // center art vertically
+
+                // Schedule sixel to be written after buffer flush
+                let sixelRow = row + artStartOffset
+                let sixelCol = pad.count + 3 // "│ " = 2 chars + 1-based col
+                setSixel(row: sixelRow, col: sixelCol, data: artwork!.sixelString)
+
+                for i in 0..<totalRows {
+                    moveTo(row: row, col: 1)
+                    setFg(theme.border)
+                    append(pad + "│ ")
+
+                    // Leave space for artwork
+                    append(String(repeating: " ", count: artColWidth))
+
+                    // Text column
+                    let textLineIdx = i - textStartOffset
+                    switch textLineIdx {
+                    case 0: // Track name
+                        reset(); setFg(theme.textBright); setBold()
+                        let leftSpace = max(0, (textW - trackName.visualWidth) / 2)
+                        let rightSpace = max(0, textW - leftSpace - trackName.visualWidth)
+                        append(String(repeating: " ", count: leftSpace))
+                        append(trackName)
+                        reset(); setFg(theme.border)
+                        append(String(repeating: " ", count: rightSpace))
+                    case 1: // Artist — Album
+                        reset(); setFg(theme.timeText)
+                        let leftSpace = max(0, (textW - subtitle.visualWidth) / 2)
+                        let rightSpace = max(0, textW - leftSpace - subtitle.visualWidth)
+                        append(String(repeating: " ", count: leftSpace))
+                        append(subtitle)
+                        reset(); setFg(theme.border)
+                        append(String(repeating: " ", count: rightSpace))
+                    case 2: // Progress bar
+                        reset(); setFg(theme.accent)
+                        append(String(repeating: "━", count: max(0, filled)))
+                        setFg(theme.textMuted)
+                        append(String(repeating: "─", count: max(0, empty)))
+                        setFg(theme.timeText)
+                        append(timeStr)
+                        reset(); setFg(theme.border)
+                        let progWidth = max(0, filled) + max(0, empty) + timeStr.count
+                        let remaining = max(0, textW - progWidth)
+                        append(String(repeating: " ", count: remaining))
+                    case 3: // Controls
+                        reset(); setFg(theme.text)
+                        let leftSpace = max(0, (textW - controls.visualWidth) / 2)
+                        let rightSpace = max(0, textW - leftSpace - controls.visualWidth)
+                        append(String(repeating: " ", count: leftSpace))
+                        append(controls)
+                        reset(); setFg(theme.border)
+                        append(String(repeating: " ", count: rightSpace))
+                    default:
+                        reset(); setFg(theme.border)
+                        append(String(repeating: " ", count: textW))
+                    }
+
+                    setFg(theme.border)
+                    append(" │")
+                    reset()
+                    row += 1
+                }
+
+                _ = startRow // suppress unused warning
+            } else {
+                // Text-only layout (no artwork or terminal too narrow)
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
+                row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(track.name, to: innerW), fg: theme.textBright, bold: true, theme: theme)
+                let subtitle = "\(track.artist) — \(track.album)"
+                row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(subtitle, to: innerW), fg: theme.timeText, theme: theme)
+                row = renderProgressBar(row: row, pad: pad, boxW: boxW, position: track.position, duration: track.duration, theme: theme)
+
+                let playIcon = state.playerState == .playing ? "▐▐" : " ▶"
+                let shuffleStr = state.shuffleEnabled ? "⤮ on " : "⤮ off"
+                let repeatStr = "⟳ \(state.repeatMode.label)"
+                let volStr = "Vol: \(state.volume)%"
+                let controls = " ◂◂  \(playIcon)  ▸▸      \(shuffleStr)  \(repeatStr)   \(volStr) "
+                row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: truncate(controls, to: innerW), fg: theme.text, theme: theme)
+                row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
+            }
         } else {
             row = emptyBoxLine(row: row, pad: pad, boxW: boxW, theme: theme)
             row = centeredBoxLine(row: row, pad: pad, boxW: boxW, text: "No track playing", fg: theme.textDim, theme: theme)
@@ -415,10 +524,10 @@ struct Screen {
             case .playlists:
                 help = "Tab Switch · ↑/↓ Nav · Enter Browse · space Pause · q Quit"
             case .tracks:
-                help = "Tab Switch · ↑/↓ Nav · Enter Play · Esc Back · q Quit"
+                help = "Tab Switch · ↑/↓ Nav · Enter Play · Backspace Back · q Quit"
             }
         case .search:
-            help = "Type to search · ↑/↓ Nav · Enter Play · Esc Clear · q Quit"
+            help = "Type to search · ↑/↓ Nav · Enter Play · Backspace Clear · q Quit"
         case .themes:
             help = "Tab Switch · ↑/↓ Nav · Enter Apply · q Quit"
         }

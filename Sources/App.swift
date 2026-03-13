@@ -17,8 +17,16 @@ final class App: @unchecked Sendable {
     private var pendingState: AppState?
     private let stateLock = NSLock()
 
+    // Sixel artwork
+    private var sixelSupported = false
+    private var artworkCache: SixelArt.ArtworkCache?
+    private var artworkCacheKey = ""
+    private var pendingArtwork: SixelArt.ArtworkCache?
+    private var artworkInFlight = false
+
     func run() {
         terminal.enableRawMode()
+        sixelSupported = SixelArt.detectSixelSupport()
 
         defer {
             terminal.restoreMode()
@@ -99,6 +107,7 @@ final class App: @unchecked Sendable {
     }
 
     private func applyFresh(_ fresh: AppState) {
+        let oldKey = artworkCacheKey(for: state.track)
         state.musicRunning = fresh.musicRunning
         state.playerState = fresh.playerState
         state.track = fresh.track
@@ -106,6 +115,11 @@ final class App: @unchecked Sendable {
         state.shuffleEnabled = fresh.shuffleEnabled
         state.repeatMode = fresh.repeatMode
         lastPositionUpdate = Date()
+
+        let newKey = artworkCacheKey(for: state.track)
+        if sixelSupported && newKey != oldKey {
+            fetchArtworkAsync(key: newKey)
+        }
     }
 
     // MARK: - Key Handling
@@ -280,7 +294,7 @@ final class App: @unchecked Sendable {
 
     private func handleLibraryTracksKey(_ key: Key) {
         switch key {
-        case .escape:
+        case .backspace:
             state.librarySubView = .playlists
         case .up:
             if state.playlistTracksSelected > 0 {
@@ -319,15 +333,14 @@ final class App: @unchecked Sendable {
 
     private func handleSearchKey(_ key: Key) {
         switch key {
-        case .escape:
-            state.searchQuery = ""
-            state.searchResults = []
-            state.searchSelected = 0
-            state.searchScroll = 0
         case .backspace:
             if !state.searchQuery.isEmpty {
                 state.searchQuery.removeLast()
                 performSearch()
+            } else {
+                state.searchResults = []
+                state.searchSelected = 0
+                state.searchScroll = 0
             }
         case .up:
             if state.searchSelected > 0 {
@@ -440,6 +453,17 @@ final class App: @unchecked Sendable {
     // MARK: - Render
 
     private func render() {
+        // Apply pending artwork
+        stateLock.lock()
+        if let art = pendingArtwork {
+            pendingArtwork = nil
+            stateLock.unlock()
+            artworkCache = art
+            artworkCacheKey = art.key
+        } else {
+            stateLock.unlock()
+        }
+
         let size = terminal.getSize()
         var displayState = state
         // Interpolate progress position when playing
@@ -448,7 +472,8 @@ final class App: @unchecked Sendable {
             displayState.track?.position = min(track.position + elapsed, track.duration)
         }
         var screen = Screen()
-        screen.renderMain(state: displayState, width: size.width, height: size.height, theme: currentTheme)
+        let artwork = sixelSupported ? artworkCache : nil
+        screen.renderMain(state: displayState, width: size.width, height: size.height, theme: currentTheme, artwork: artwork)
         screen.flush(to: terminal)
     }
 
@@ -485,6 +510,10 @@ final class App: @unchecked Sendable {
 
             if isNewTrack {
                 lastPositionUpdate = Date()
+                if sixelSupported {
+                    let key = "\(artist)\t\(album)"
+                    fetchArtworkAsync(key: key)
+                }
             }
         }
 
@@ -509,5 +538,28 @@ final class App: @unchecked Sendable {
         let size = terminal.getSize()
         // Chrome: top border(1) + title(1) + sep(1) + player(~7) + sep(1) + tab bar(1) + sep(1) + sep(1) + help(1) + bottom border(1) = ~16
         return max(3, size.height - 16)
+    }
+
+    private func artworkCacheKey(for track: Track?) -> String {
+        guard let t = track else { return "" }
+        return "\(t.artist)\t\(t.album)"
+    }
+
+    private func fetchArtworkAsync(key: String) {
+        guard !key.isEmpty, !artworkInFlight else { return }
+        if key == artworkCacheKey { return }
+        artworkInFlight = true
+        refreshQueue.async { [self] in
+            let result = SixelArt.generateSixel(artRows: 7)
+            stateLock.lock()
+            if var art = result {
+                art.key = key
+                pendingArtwork = art
+            } else {
+                pendingArtwork = SixelArt.ArtworkCache(key: key)
+            }
+            artworkInFlight = false
+            stateLock.unlock()
+        }
     }
 }

@@ -222,6 +222,7 @@ struct MusicController: Sendable {
         tell application "Music"
             set results to (search playlist "Library" for "\(escapedName)")
             if (count of results) > 0 then
+                play playlist "Library"
                 set idx to index of item 1 of results
                 play track idx of playlist "Library"
             end if

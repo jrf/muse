@@ -1,5 +1,4 @@
-default:
-    @just --list
+default: install
 
 # Build in debug mode
 build:
