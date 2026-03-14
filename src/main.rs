@@ -5,6 +5,7 @@ mod ui;
 
 use std::ffi::c_void;
 use std::io;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -31,7 +32,11 @@ enum AppEvent {
     SearchResults(String, Vec<bridge::SearchResult>),
     LyricsLoaded(String, Option<bridge::LyricsResult>),
     ArtworkLoaded(String, ratatui_image::protocol::StatefulProtocol),
+    AutoAdvance(u64),
 }
+
+/// Monotonic token used to cancel stale auto-advance requests.
+static AUTO_ADVANCE_TOKEN: AtomicU64 = AtomicU64::new(0);
 
 fn main() -> io::Result<()> {
     // Ensure Music.app is running and fetch initial state BEFORE entering raw mode.
@@ -233,6 +238,21 @@ fn run_app(
                         state.artwork = Some(proto);
                     }
                 }
+                AppEvent::AutoAdvance(token) => {
+                    // Only advance if the token is still current (not cancelled by a "Playing" event)
+                    if token == AUTO_ADVANCE_TOKEN.load(Ordering::SeqCst)
+                        && !state.queue_tracks.is_empty()
+                        && state.queue_selected + 1 < state.queue_tracks.len()
+                    {
+                        let next_idx = state.queue_selected + 1;
+                        state.queue_selected = next_idx;
+                        state.queue_scroll = next_idx.saturating_sub(3);
+                        let playlist = state.queue_playlist_name.clone();
+                        fire_and_refresh(&tx, move || {
+                            bridge::play_track_in_playlist(&playlist, next_idx as i32)
+                        });
+                    }
+                }
             },
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
@@ -388,7 +408,11 @@ fn handle_notification(
     tx: &mpsc::Sender<AppEvent>,
 ) {
     match info.player_state.as_str() {
-        "Playing" => state.player_state = bridge::PlayerState::Playing,
+        "Playing" => {
+            state.player_state = bridge::PlayerState::Playing;
+            // Cancel any pending auto-advance
+            AUTO_ADVANCE_TOKEN.fetch_add(1, Ordering::SeqCst);
+        }
         "Paused" => state.player_state = bridge::PlayerState::Paused,
         "Stopped" => {
             // Don't immediately clear — may be a transient transition.
@@ -396,6 +420,19 @@ fn handle_notification(
             // (i.e. this is genuinely the end of playback, not a transition).
             if info.name.is_empty() {
                 state.player_state = bridge::PlayerState::Stopped;
+                // Schedule auto-advance if there are more tracks in the queue
+                if !state.queue_tracks.is_empty()
+                    && state.queue_selected + 1 < state.queue_tracks.len()
+                {
+                    let token = AUTO_ADVANCE_TOKEN.load(Ordering::SeqCst);
+                    let tx2 = tx.clone();
+                    std::thread::spawn(move || {
+                        // Debounce: wait before advancing to avoid cascading from
+                        // transient "Stopped" states during track transitions.
+                        std::thread::sleep(Duration::from_millis(1500));
+                        let _ = tx2.send(AppEvent::AutoAdvance(token));
+                    });
+                }
             }
         }
         _ => {}

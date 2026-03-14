@@ -583,8 +583,24 @@ fn draw_help_overlay(f: &mut Frame, area: Rect, theme: &Theme) {
         ]));
     }
 
-    let p = Paragraph::new(lines).alignment(Alignment::Center);
-    f.render_widget(p, area);
+    let content_width = 40u16;
+    let x = area.x + area.width.saturating_sub(content_width) / 2;
+    let centered = Rect::new(x, area.y, content_width.min(area.width), area.height);
+
+    // Title centered across full area
+    let title = Paragraph::new(Line::from(Span::styled(
+        "Keybindings",
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD),
+    )))
+    .alignment(Alignment::Center);
+    f.render_widget(title, Rect::new(area.x, area.y, area.width, 1));
+
+    // Bindings left-aligned in centered block, offset past title + blank line
+    let bindings_area = Rect::new(centered.x, centered.y + 2, centered.width, centered.height.saturating_sub(2));
+    let p = Paragraph::new(lines[2..].to_vec());
+    f.render_widget(p, bindings_area);
 }
 
 fn draw_playlist_picker(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
