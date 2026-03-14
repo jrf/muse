@@ -486,7 +486,7 @@ fn draw_lyrics(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
         None
     };
 
-    let items: Vec<ListItem> = state
+    let lines: Vec<Line> = state
         .lyrics_lines
         .iter()
         .enumerate()
@@ -500,12 +500,12 @@ fn draw_lyrics(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
             } else {
                 Style::default().fg(theme.text)
             };
-            ListItem::new(Span::styled(&line.text, style))
+            Line::styled(&line.text, style)
         })
         .collect();
 
-    let mut list_state = ListState::default().with_offset(state.lyrics_scroll);
-    f.render_stateful_widget(List::new(items), area, &mut list_state);
+    let paragraph = Paragraph::new(lines).scroll((state.lyrics_scroll as u16, 0));
+    f.render_widget(paragraph, area);
 }
 
 fn draw_themes(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
