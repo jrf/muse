@@ -38,14 +38,16 @@ struct Screen {
     }
 
     func flush(to terminal: Terminal) {
-        terminal.write("\u{1B}[H")   // cursor home
+        terminal.write("\u{1B}[?2026h")  // begin synchronized update
+        terminal.write("\u{1B}[H")       // cursor home
         terminal.write(buffer)
-        terminal.write("\u{1B}[J")   // clear from cursor to end of screen
+        terminal.write("\u{1B}[J")       // clear from cursor to end of screen
         // Write sixel after clear so it doesn't get wiped
         if let sixel = sixelOutput {
             terminal.write("\u{1B}[\(sixel.row);\(sixel.col)H")
             terminal.write(sixel.data)
         }
+        terminal.write("\u{1B}[?2026l")  // end synchronized update
     }
 
     // MARK: - Main Renderer
