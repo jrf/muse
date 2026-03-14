@@ -40,6 +40,9 @@ final class App: @unchecked Sendable {
         // Load persisted theme
         loadConfig()
 
+        // Ensure Music.app is running (launch hidden if needed)
+        music.ensureRunning()
+
         // Initial state fetch (blocking for first render)
         applyFresh(music.fetchFullState())
 

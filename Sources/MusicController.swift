@@ -18,6 +18,19 @@ struct MusicController: Sendable {
         return runAppleScript(script) == "true"
     }
 
+    /// Launch Music.app hidden in the background if it isn't already running.
+    func ensureRunning() {
+        guard !isRunning() else { return }
+        let script = """
+        tell application "Music" to launch
+        delay 1
+        tell application "System Events"
+            set visible of process "Music" to false
+        end tell
+        """
+        _ = runAppleScript(script)
+    }
+
     func playPause() {
         _ = runAppleScript(#"tell application "Music" to playpause"#)
     }
