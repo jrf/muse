@@ -2,19 +2,19 @@ default: install
 
 # Build in debug mode
 build:
-    swift build
+    cargo build
 
 # Build in release mode
 release:
-    swift build -c release
+    cargo build --release
 
 # Run the app
 run:
-    swift run muse
+    cargo run
 
 # Install to ~/.local/bin
 install: release
-    cp .build/release/muse ~/.local/bin/
+    cp target/release/muse ~/.local/bin/
     codesign -s - ~/.local/bin/muse
 
 # Uninstall from /usr/local/bin
@@ -23,4 +23,12 @@ uninstall:
 
 # Remove build artifacts
 clean:
-    swift package clean
+    cargo clean
+
+# Build Swift-only (legacy)
+build-swift:
+    swift build
+
+# Run Swift version (legacy)
+run-swift:
+    swift run muse

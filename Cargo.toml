@@ -1,0 +1,11 @@
+[package]
+name = "muse"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ratatui = "0.30"
+crossterm = "0.28"
+unicode-width = "0.2"
+ratatui-image = { version = "10", default-features = false, features = ["crossterm", "image-defaults"] }
+image = "0.25"
