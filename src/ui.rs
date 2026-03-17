@@ -16,8 +16,8 @@ use crate::theme::Theme;
 pub fn draw(f: &mut Frame, state: &AppState, theme: &Theme, artwork: &mut Option<StatefulProtocol>) {
     let area = f.area();
 
-    // Center the UI in an 80-col box
-    let box_w = area.width.min(80);
+    // Center the UI in a 120-col box
+    let box_w = area.width.min(120);
     let h_pad = (area.width.saturating_sub(box_w)) / 2;
 
     let inner = Rect {
