@@ -47,7 +47,7 @@ extern "C" {
     fn music_play_playlist(name: *const c_char);
 
     // Playlist tracks (opaque pointer)
-    fn music_get_playlist_tracks(name: *const c_char) -> *mut c_void;
+    fn music_get_playlist_tracks_bulk(name: *const c_char) -> *mut c_void;
     fn music_playlist_tracks_count(ptr: *const c_void) -> i32;
     fn music_playlist_tracks_name(ptr: *const c_void, index: i32) -> *mut c_char;
     fn music_playlist_tracks_artist(ptr: *const c_void, index: i32) -> *mut c_char;
@@ -260,7 +260,7 @@ pub struct PlaylistTrack {
 pub fn get_playlist_tracks(name: &str) -> Vec<PlaylistTrack> {
     let c_name = CString::new(name).unwrap_or_default();
     unsafe {
-        let ptr = music_get_playlist_tracks(c_name.as_ptr());
+        let ptr = music_get_playlist_tracks_bulk(c_name.as_ptr());
         let count = music_playlist_tracks_count(ptr);
         let mut result = Vec::with_capacity(count as usize);
         for i in 0..count {

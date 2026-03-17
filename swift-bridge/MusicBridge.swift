@@ -346,33 +346,58 @@ public func music_play_playlist(_ name: UnsafePointer<CChar>) {
 
 // MARK: - Playlist Tracks (opaque pointer pattern)
 
-@_cdecl("music_get_playlist_tracks")
-public func music_get_playlist_tracks(_ name: UnsafePointer<CChar>) -> UnsafeMutableRawPointer {
+@_cdecl("music_get_playlist_tracks_bulk")
+public func music_get_playlist_tracks_bulk(_ name: UnsafePointer<CChar>) -> UnsafeMutableRawPointer {
     let playlistName = String(cString: name)
     let escaped = playlistName.replacingOccurrences(of: "\"", with: "\\\"")
+    // Bulk property access: each `name of every track` is a single Apple Event,
+    // orders of magnitude faster than iterating track-by-track.
+    // Results are joined using text item delimiters (fast, built-in).
     let script = """
     tell application "Music"
         set pl to playlist "\(escaped)"
-        set trks to every track of pl
-        set output to ""
-        set maxTracks to 50
-        if (count of trks) < maxTracks then set maxTracks to (count of trks)
-        repeat with i from 1 to maxTracks
-            set t to item i of trks
-            set output to output & name of t & "||" & artist of t & "||" & album of t & "||" & duration of t & "\\n"
-        end repeat
-        return output
+        set allNames to name of every track of pl
+        set allArtists to artist of every track of pl
+        set allAlbums to album of every track of pl
+        set allDurations to duration of every track of pl
+        set tid to AppleScript's text item delimiters
+        set AppleScript's text item delimiters to "||"
+        set nameStr to allNames as text
+        set artistStr to allArtists as text
+        set albumStr to allAlbums as text
+        -- Build duration string without a slow repeat loop:
+        -- coerce the list to text directly via a handler
+        set AppleScript's text item delimiters to ", "
+        set durFlat to allDurations as text
+        set AppleScript's text item delimiters to ", "
+        set durItems to text items of durFlat
+        set AppleScript's text item delimiters to "||"
+        set durStr to durItems as text
+        set AppleScript's text item delimiters to tid
+        return nameStr & "\\n" & artistStr & "\\n" & albumStr & "\\n" & durStr
     end tell
     """
     guard let result = runAppleScript(script) else {
         return Unmanaged.passRetained(PlaylistTrackArrayBox([])).toOpaque()
     }
-    let tracks = result.components(separatedBy: "\n").compactMap { line -> (String, String, String, Double)? in
-        let parts = line.components(separatedBy: "||")
-        guard parts.count >= 4 else { return nil }
-        let name = parts[0].trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { return nil }
-        return (name, parts[1], parts[2], Double(parts[3].trimmingCharacters(in: .whitespaces)) ?? 0)
+    let lines = result.components(separatedBy: "\n")
+    guard lines.count >= 4 else {
+        return Unmanaged.passRetained(PlaylistTrackArrayBox([])).toOpaque()
+    }
+    let names = lines[0].components(separatedBy: "||")
+    let artists = lines[1].components(separatedBy: "||")
+    let albums = lines[2].components(separatedBy: "||")
+    let durations = lines[3].components(separatedBy: "||")
+    let count = names.count
+    var tracks: [(String, String, String, Double)] = []
+    tracks.reserveCapacity(count)
+    for i in 0..<count {
+        let name = names[i].trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { continue }
+        let artist = i < artists.count ? artists[i] : ""
+        let album = i < albums.count ? albums[i] : ""
+        let dur = i < durations.count ? (Double(durations[i].trimmingCharacters(in: .whitespaces)) ?? 0) : 0
+        tracks.append((name, artist, album, dur))
     }
     return Unmanaged.passRetained(PlaylistTrackArrayBox(tracks)).toOpaque()
 }

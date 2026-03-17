@@ -1,4 +1,5 @@
 mod bridge;
+mod lastfm;
 mod state;
 mod theme;
 mod ui;
@@ -21,6 +22,34 @@ use ratatui_image::picker::Picker;
 use state::{AppState, LibrarySubView, Tab};
 use theme::Theme;
 
+const PAGE_SIZE: usize = 20;
+
+/// Navigate a list selection with scroll tracking. Returns (new_selected, new_scroll).
+fn list_nav(code: KeyCode, selected: usize, scroll: usize, len: usize) -> Option<(usize, usize)> {
+    if len == 0 {
+        return None;
+    }
+    let last = len - 1;
+    let visible = PAGE_SIZE;
+    let new_sel = match code {
+        KeyCode::Up => selected.saturating_sub(1),
+        KeyCode::Down => (selected + 1).min(last),
+        KeyCode::Home => 0,
+        KeyCode::End => last,
+        KeyCode::PageUp => selected.saturating_sub(visible),
+        KeyCode::PageDown => (selected + visible).min(last),
+        _ => return None,
+    };
+    let new_scroll = if new_sel < scroll {
+        new_sel
+    } else if new_sel >= scroll + visible {
+        new_sel - (visible - 1)
+    } else {
+        scroll
+    };
+    Some((new_sel, new_scroll))
+}
+
 /// Events sent to the main loop.
 enum AppEvent {
     Key(KeyEvent),
@@ -28,11 +57,12 @@ enum AppEvent {
     MusicNotification(bridge::NotificationInfo),
     StateRefreshed(bridge::FullState),
     PlaylistsLoaded(Vec<String>),
-    PlaylistTracksLoaded(Vec<bridge::PlaylistTrack>),
+    PlaylistTracksLoaded(String, Vec<bridge::PlaylistTrack>),
     SearchResults(String, Vec<bridge::SearchResult>),
     LyricsLoaded(String, Option<bridge::LyricsResult>),
     ArtworkLoaded(String, ratatui_image::protocol::StatefulProtocol),
     AutoAdvance(u64),
+    LastfmScrobbled,
 }
 
 /// Monotonic token used to cancel stale auto-advance requests.
@@ -119,6 +149,13 @@ fn run_app(
     // Load config
     load_config(&mut state, &mut current_theme);
 
+    // Last.fm (via muse-scrobble CLI)
+    let lastfm_available = lastfm::is_available();
+    let mut scrobble_tracker = lastfm::ScrobbleTracker::new();
+    if lastfm_available {
+        state.lastfm_status = "last.fm".to_string();
+    }
+
     // Register notification callback — sends events to the channel
     {
         let tx_notify = tx.clone();
@@ -173,10 +210,57 @@ fn run_app(
                             let _ = tx2.send(AppEvent::StateRefreshed(fresh));
                         });
                     }
+
+                    // Last.fm scrobble check
+                    if lastfm_available && scrobble_tracker.should_scrobble() {
+                        scrobble_tracker.mark_scrobbled();
+                        let artist = scrobble_tracker.artist.clone();
+                        let track = scrobble_tracker.track_name.clone();
+                        let album = scrobble_tracker.album.clone();
+                        let ts = scrobble_tracker.start_timestamp();
+                        let dur = scrobble_tracker.duration as u64;
+                        let tx2 = tx.clone();
+                        std::thread::spawn(move || {
+                            let _ = lastfm::scrobble(&artist, &track, &album, dur, ts);
+                            let _ = tx2.send(AppEvent::LastfmScrobbled);
+                        });
+                    }
                 }
                 AppEvent::MusicNotification(info) => {
                     handle_notification(&mut state, &info, &picker, &tx);
                     last_position_update = Instant::now();
+
+                    // Last.fm: track play state changes
+                    match info.player_state.as_str() {
+                        "Playing" => scrobble_tracker.on_play(),
+                        "Paused" => scrobble_tracker.on_pause(),
+                        _ => {}
+                    }
+
+                    // Last.fm: new track detection
+                    if !info.name.is_empty() {
+                        let is_new_track = scrobble_tracker.track_name != info.name
+                            || scrobble_tracker.artist != info.artist;
+                        if is_new_track {
+                            scrobble_tracker.on_track_change(
+                                &info.name,
+                                &info.artist,
+                                &info.album,
+                                info.total_time_ms / 1000.0,
+                            );
+                        }
+                        // Send "now playing" if needed
+                        if lastfm_available && scrobble_tracker.should_send_now_playing() {
+                            scrobble_tracker.mark_now_playing_sent();
+                            let artist = info.artist.clone();
+                            let track = info.name.clone();
+                            let album = info.album.clone();
+                            let dur = (info.total_time_ms / 1000.0) as u64;
+                            std::thread::spawn(move || {
+                                lastfm::now_playing(&artist, &track, &album, dur);
+                            });
+                        }
+                    }
 
                     // Fetch lyrics for new track if needed
                     if !info.name.is_empty() {
@@ -212,8 +296,12 @@ fn run_app(
                 AppEvent::PlaylistsLoaded(playlists) => {
                     state.playlists = playlists;
                 }
-                AppEvent::PlaylistTracksLoaded(tracks) => {
-                    state.playlist_tracks = tracks;
+                AppEvent::PlaylistTracksLoaded(playlist_name, tracks) => {
+                    if let LibrarySubView::Tracks(ref current) = state.library_sub_view {
+                        if *current == playlist_name {
+                            state.playlist_tracks = tracks;
+                        }
+                    }
                 }
                 AppEvent::SearchResults(query, results) => {
                     if state.search_query == query {
@@ -237,6 +325,9 @@ fn run_app(
                     if state.artwork_key == key {
                         state.artwork = Some(proto);
                     }
+                }
+                AppEvent::LastfmScrobbled => {
+                    state.lastfm_status = "last.fm ✓".to_string();
                 }
                 AppEvent::AutoAdvance(token) => {
                     // Only advance if the token is still current (not cancelled by a "Playing" event)
@@ -367,6 +458,7 @@ fn interpolated_state(state: &AppState, last_update: &Instant) -> AppState {
         show_playlist_picker: state.show_playlist_picker,
         playlist_picker_selected: state.playlist_picker_selected,
         playlist_picker_scroll: state.playlist_picker_scroll,
+        lastfm_status: state.lastfm_status.clone(),
     };
 
     // Interpolate position when playing
@@ -661,24 +753,12 @@ fn handle_key(
 }
 
 fn handle_queue_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppEvent>) {
+    if let Some((sel, scr)) = list_nav(key.code, state.queue_selected, state.queue_scroll, state.queue_tracks.len()) {
+        state.queue_selected = sel;
+        state.queue_scroll = scr;
+        return;
+    }
     match key.code {
-        KeyCode::Up => {
-            if state.queue_selected > 0 {
-                state.queue_selected -= 1;
-                if state.queue_selected < state.queue_scroll {
-                    state.queue_scroll = state.queue_selected;
-                }
-            }
-        }
-        KeyCode::Down => {
-            if state.queue_selected + 1 < state.queue_tracks.len() {
-                state.queue_selected += 1;
-                // Approximate visible rows
-                if state.queue_selected >= state.queue_scroll + 20 {
-                    state.queue_scroll = state.queue_selected - 19;
-                }
-            }
-        }
         KeyCode::Enter => {
             if !state.queue_tracks.is_empty() && state.queue_selected < state.queue_tracks.len() {
                 let playlist = state.queue_playlist_name.clone();
@@ -692,23 +772,13 @@ fn handle_queue_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppEv
 
 fn handle_library_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppEvent>) {
     match &state.library_sub_view {
-        LibrarySubView::Playlists => match key.code {
-            KeyCode::Up => {
-                if state.library_selected > 0 {
-                    state.library_selected -= 1;
-                    if state.library_selected < state.library_scroll {
-                        state.library_scroll = state.library_selected;
-                    }
-                }
+        LibrarySubView::Playlists => {
+            if let Some((sel, scr)) = list_nav(key.code, state.library_selected, state.library_scroll, state.playlists.len()) {
+                state.library_selected = sel;
+                state.library_scroll = scr;
+                return;
             }
-            KeyCode::Down => {
-                if state.library_selected + 1 < state.playlists.len() {
-                    state.library_selected += 1;
-                    if state.library_selected >= state.library_scroll + 20 {
-                        state.library_scroll = state.library_selected - 19;
-                    }
-                }
-            }
+            match key.code {
             KeyCode::Enter => {
                 if !state.playlists.is_empty() && state.library_selected < state.playlists.len() {
                     let name = state.playlists[state.library_selected].clone();
@@ -719,31 +789,22 @@ fn handle_library_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<App
                     let tx2 = tx.clone();
                     std::thread::spawn(move || {
                         let tracks = bridge::get_playlist_tracks(&name);
-                        let _ = tx2.send(AppEvent::PlaylistTracksLoaded(tracks));
+                        let _ = tx2.send(AppEvent::PlaylistTracksLoaded(name, tracks));
                     });
                 }
             }
             _ => {}
-        },
-        LibrarySubView::Tracks(_) => match key.code {
+            }
+        }
+        LibrarySubView::Tracks(_) => {
+            if let Some((sel, scr)) = list_nav(key.code, state.playlist_tracks_selected, state.playlist_tracks_scroll, state.playlist_tracks.len()) {
+                state.playlist_tracks_selected = sel;
+                state.playlist_tracks_scroll = scr;
+                return;
+            }
+            match key.code {
             KeyCode::Backspace => {
                 state.library_sub_view = LibrarySubView::Playlists;
-            }
-            KeyCode::Up => {
-                if state.playlist_tracks_selected > 0 {
-                    state.playlist_tracks_selected -= 1;
-                    if state.playlist_tracks_selected < state.playlist_tracks_scroll {
-                        state.playlist_tracks_scroll = state.playlist_tracks_selected;
-                    }
-                }
-            }
-            KeyCode::Down => {
-                if state.playlist_tracks_selected + 1 < state.playlist_tracks.len() {
-                    state.playlist_tracks_selected += 1;
-                    if state.playlist_tracks_selected >= state.playlist_tracks_scroll + 19 {
-                        state.playlist_tracks_scroll = state.playlist_tracks_selected - 18;
-                    }
-                }
             }
             KeyCode::Enter => {
                 if !state.playlist_tracks.is_empty()
@@ -763,11 +824,17 @@ fn handle_library_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<App
                 }
             }
             _ => {}
-        },
+            }
+        }
     }
 }
 
 fn handle_search_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppEvent>) {
+    if let Some((sel, scr)) = list_nav(key.code, state.search_selected, state.search_scroll, state.search_results.len()) {
+        state.search_selected = sel;
+        state.search_scroll = scr;
+        return;
+    }
     match key.code {
         KeyCode::Backspace => {
             if !state.search_query.is_empty() {
@@ -777,22 +844,6 @@ fn handle_search_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppE
                 state.search_results.clear();
                 state.search_selected = 0;
                 state.search_scroll = 0;
-            }
-        }
-        KeyCode::Up => {
-            if state.search_selected > 0 {
-                state.search_selected -= 1;
-                if state.search_selected < state.search_scroll {
-                    state.search_scroll = state.search_selected;
-                }
-            }
-        }
-        KeyCode::Down => {
-            if state.search_selected + 1 < state.search_results.len() {
-                state.search_selected += 1;
-                if state.search_selected >= state.search_scroll + 19 {
-                    state.search_scroll = state.search_selected - 18;
-                }
             }
         }
         KeyCode::Enter => {
@@ -827,6 +878,23 @@ fn handle_lyrics_key(key: KeyEvent, state: &mut AppState) {
             state.lyrics_scroll += 1;
             state.lyrics_manual_scroll = true;
         }
+        KeyCode::Home => {
+            state.lyrics_scroll = 0;
+            state.lyrics_manual_scroll = true;
+        }
+        KeyCode::End => {
+            // Scroll to a large value; rendering will clamp it
+            state.lyrics_scroll = usize::MAX / 2;
+            state.lyrics_manual_scroll = true;
+        }
+        KeyCode::PageUp => {
+            state.lyrics_scroll = state.lyrics_scroll.saturating_sub(PAGE_SIZE);
+            state.lyrics_manual_scroll = true;
+        }
+        KeyCode::PageDown => {
+            state.lyrics_scroll += PAGE_SIZE;
+            state.lyrics_manual_scroll = true;
+        }
         KeyCode::Char('0') => {
             state.lyrics_manual_scroll = false;
         }
@@ -835,25 +903,13 @@ fn handle_lyrics_key(key: KeyEvent, state: &mut AppState) {
 }
 
 fn handle_themes_key(key: KeyEvent, state: &mut AppState, theme: &mut Theme) {
+    if let Some((sel, scr)) = list_nav(key.code, state.theme_selected, state.theme_scroll, theme::ALL_THEMES.len()) {
+        state.theme_selected = sel;
+        state.theme_scroll = scr;
+        preview_theme(state, theme);
+        return;
+    }
     match key.code {
-        KeyCode::Up => {
-            if state.theme_selected > 0 {
-                state.theme_selected -= 1;
-                if state.theme_selected < state.theme_scroll {
-                    state.theme_scroll = state.theme_selected;
-                }
-                preview_theme(state, theme);
-            }
-        }
-        KeyCode::Down => {
-            if state.theme_selected + 1 < theme::ALL_THEMES.len() {
-                state.theme_selected += 1;
-                if state.theme_selected >= state.theme_scroll + 20 {
-                    state.theme_scroll = state.theme_selected - 19;
-                }
-                preview_theme(state, theme);
-            }
-        }
         KeyCode::Enter => {
             if state.theme_selected < theme::ALL_THEMES.len() {
                 let (name, t) = theme::ALL_THEMES[state.theme_selected];
@@ -867,23 +923,12 @@ fn handle_themes_key(key: KeyEvent, state: &mut AppState, theme: &mut Theme) {
 }
 
 fn handle_playlist_picker_key(key: KeyEvent, state: &mut AppState, _tx: &mpsc::Sender<AppEvent>) {
+    if let Some((sel, scr)) = list_nav(key.code, state.playlist_picker_selected, state.playlist_picker_scroll, state.playlists.len()) {
+        state.playlist_picker_selected = sel;
+        state.playlist_picker_scroll = scr;
+        return;
+    }
     match key.code {
-        KeyCode::Up => {
-            if state.playlist_picker_selected > 0 {
-                state.playlist_picker_selected -= 1;
-                if state.playlist_picker_selected < state.playlist_picker_scroll {
-                    state.playlist_picker_scroll = state.playlist_picker_selected;
-                }
-            }
-        }
-        KeyCode::Down => {
-            if state.playlist_picker_selected + 1 < state.playlists.len() {
-                state.playlist_picker_selected += 1;
-                if state.playlist_picker_selected >= state.playlist_picker_scroll + 20 {
-                    state.playlist_picker_scroll = state.playlist_picker_selected - 19;
-                }
-            }
-        }
         KeyCode::Enter => {
             if !state.playlists.is_empty()
                 && state.playlist_picker_selected < state.playlists.len()

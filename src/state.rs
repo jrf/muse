@@ -110,6 +110,9 @@ pub struct AppState {
     pub show_playlist_picker: bool,
     pub playlist_picker_selected: usize,
     pub playlist_picker_scroll: usize,
+
+    // Last.fm
+    pub lastfm_status: String,
 }
 
 impl Default for AppState {
@@ -152,6 +155,7 @@ impl Default for AppState {
             show_playlist_picker: false,
             playlist_picker_selected: 0,
             playlist_picker_scroll: 0,
+            lastfm_status: String::new(),
         }
     }
 }

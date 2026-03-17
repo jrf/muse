@@ -654,16 +654,27 @@ fn draw_playlist_picker(f: &mut Frame, area: Rect, state: &AppState, theme: &The
     f.render_stateful_widget(List::new(items), rows[1], &mut list_state);
 }
 
-fn draw_help_line(f: &mut Frame, area: Rect, _state: &AppState, theme: &Theme) {
-    f.render_widget(
-        Paragraph::new(Span::styled(
-            "? Help · q Quit",
-            Style::default()
-                .fg(theme.text_dim)
-                .add_modifier(Modifier::DIM),
-        )),
-        area,
-    );
+fn draw_help_line(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
+    let left = "? Help · q Quit";
+    let right = &state.lastfm_status;
+
+    if right.is_empty() {
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                left,
+                Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM),
+            )),
+            area,
+        );
+    } else {
+        let padding = area.width as usize - left.len().min(area.width as usize) - right.len().min(area.width as usize);
+        let line = Line::from(vec![
+            Span::styled(left, Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM)),
+            Span::raw(" ".repeat(padding.max(1))),
+            Span::styled(right.as_str(), Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM)),
+        ]);
+        f.render_widget(Paragraph::new(line), area);
+    }
 }
 
 fn format_time(seconds: f64) -> String {
