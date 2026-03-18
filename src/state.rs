@@ -1,44 +1,8 @@
 //! Application state — mirrors the Swift AppState but in idiomatic Rust.
 
-use std::env;
-use std::fs;
-use std::path::PathBuf;
-
 use ratatui_image::protocol::StatefulProtocol;
 
 use crate::bridge;
-
-fn queue_state_path() -> PathBuf {
-    let mut path = PathBuf::from(env::var("HOME").unwrap_or_else(|_| ".".to_string()));
-    path.push(".local/share/muse");
-    path
-}
-
-/// Persist current queue position so CLI commands can use playlist-aware next/prev.
-pub fn save_queue_state(playlist_name: &str, selected: usize, total: usize) {
-    let dir = queue_state_path();
-    let _ = fs::create_dir_all(&dir);
-    let content = format!("{}\n{}\n{}", playlist_name, selected, total);
-    let _ = fs::write(dir.join("queue_state"), content);
-}
-
-/// Clear persisted queue state.
-pub fn clear_queue_state() {
-    let _ = fs::remove_file(queue_state_path().join("queue_state"));
-}
-
-/// Load persisted queue state: (playlist_name, selected_index, total_tracks).
-pub fn load_queue_state() -> Option<(String, usize, usize)> {
-    let content = fs::read_to_string(queue_state_path().join("queue_state")).ok()?;
-    let mut lines = content.lines();
-    let name = lines.next()?.to_string();
-    let selected: usize = lines.next()?.parse().ok()?;
-    let total: usize = lines.next()?.parse().ok()?;
-    if name.is_empty() {
-        return None;
-    }
-    Some((name, selected, total))
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {

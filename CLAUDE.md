@@ -26,6 +26,8 @@ The build process (defined in `build.rs`) automatically compiles `swift-bridge/M
 - **`bridge.rs`** — Safe Rust wrappers around `extern "C"` FFI functions. Uses opaque pointer pattern (`*mut c_void`) with accessor functions for each field, plus explicit `_free()` calls for memory management.
 - **`ui.rs`** — Ratatui rendering. Centered 80-column layout with player section, tab bar, and tab content area (Queue, Library, Search, Lyrics, Themes).
 - **`state.rs`** — `AppState` struct with all UI state: selected indices, scroll positions, loaded data, active tab.
+- **`playlist.rs`** — Apple Music-specific playlist sync logic: queue state persistence, CLI playlist-aware next/prev, queue selection sync. This module is intentionally separated because it will not be needed when Spotify support is added (Spotify handles playlists/queuing natively via its API).
+- **`lastfm.rs`** — Last.fm scrobbling via external `muse-scrobble` CLI. Tracks play timing in-process.
 - **`theme.rs`** — Six color themes using 256-color indexed palette.
 
 ### Swift Bridge (`swift-bridge/MusicBridge.swift`)
