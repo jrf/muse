@@ -70,8 +70,28 @@ static AUTO_ADVANCE_TOKEN: AtomicU64 = AtomicU64::new(0);
 
 fn handle_command(cmd: &str) -> io::Result<()> {
     match cmd {
-        "next" => bridge::next_track(),
-        "prev" | "previous" => bridge::previous_track(),
+        "next" => {
+            if let Some((playlist, selected, total)) = state::load_queue_state() {
+                if selected + 1 < total {
+                    let next_idx = selected + 1;
+                    bridge::play_track_in_playlist(&playlist, next_idx as i32);
+                    state::save_queue_state(&playlist, next_idx, total);
+                }
+            } else {
+                bridge::next_track();
+            }
+        }
+        "prev" | "previous" => {
+            if let Some((playlist, selected, total)) = state::load_queue_state() {
+                if selected > 0 {
+                    let prev_idx = selected - 1;
+                    bridge::play_track_in_playlist(&playlist, prev_idx as i32);
+                    state::save_queue_state(&playlist, prev_idx, total);
+                }
+            } else {
+                bridge::previous_track();
+            }
+        }
         "play" | "pause" | "toggle" => bridge::play_pause(),
         "shuffle" => bridge::toggle_shuffle(),
         "favorite" | "fav" => bridge::toggle_favorite(),
@@ -359,6 +379,7 @@ fn run_app(
                         let next_idx = state.queue_selected + 1;
                         state.queue_selected = next_idx;
                         state.queue_scroll = next_idx.saturating_sub(3);
+                        state::save_queue_state(&state.queue_playlist_name, next_idx, state.queue_tracks.len());
                         let playlist = state.queue_playlist_name.clone();
                         fire_and_refresh(&tx, move || {
                             bridge::play_track_in_playlist(&playlist, next_idx as i32)
@@ -569,6 +590,18 @@ fn handle_notification(
             },
         });
 
+        // Sync queue_selected if the new track matches a queue entry
+        // (handles CLI next/prev while TUI is running)
+        if is_new && !state.queue_tracks.is_empty() {
+            if let Some(pos) = state.queue_tracks.iter().position(|t| {
+                t.name == info.name && t.artist == info.artist
+            }) {
+                state.queue_selected = pos;
+                state.queue_scroll = pos.saturating_sub(3);
+                state::save_queue_state(&state.queue_playlist_name, pos, state.queue_tracks.len());
+            }
+        }
+
         // Fetch artwork for new track
         if is_new {
             let new_key = format!("{}\t{}", info.artist, info.album);
@@ -703,6 +736,7 @@ fn handle_key(
             state.queue_selected = 0;
             state.queue_scroll = 0;
             state.queue_playlist_name.clear();
+            state::clear_queue_state();
             return false;
         }
         KeyCode::Char('f') if !in_search => {
@@ -782,6 +816,7 @@ fn handle_queue_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppEv
     match key.code {
         KeyCode::Enter => {
             if !state.queue_tracks.is_empty() && state.queue_selected < state.queue_tracks.len() {
+                state::save_queue_state(&state.queue_playlist_name, state.queue_selected, state.queue_tracks.len());
                 let playlist = state.queue_playlist_name.clone();
                 let idx = state.queue_selected as i32;
                 fire_and_refresh(tx, move || bridge::play_track_in_playlist(&playlist, idx));
@@ -837,6 +872,7 @@ fn handle_library_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<App
                         state.queue_playlist_name = playlist_name.clone();
                         state.queue_selected = idx;
                         state.queue_scroll = idx.saturating_sub(3);
+                        state::save_queue_state(playlist_name, idx, state.playlist_tracks.len());
                         let name = playlist_name.clone();
                         fire_and_refresh(tx, move || {
                             bridge::play_track_in_playlist(&name, idx as i32)
