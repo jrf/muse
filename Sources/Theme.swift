@@ -27,7 +27,7 @@ struct Theme: Sendable {
             border: 208, accent: 203, text: 223, textBright: 230,
             textDim: 180, textMuted: 137, timeText: 216, error: 196
         )),
-        ("forest", Theme(
+        ("matrix", Theme(
             border: 65, accent: 114, text: 151, textBright: 194,
             textDim: 108, textMuted: 59, timeText: 150, error: 196
         )),

@@ -79,7 +79,7 @@ pub const ALL_THEMES: &[(&str, Theme)] = &[
         },
     ),
     (
-        "forest",
+        "matrix",
         Theme {
             border: Color::Indexed(65),
             accent: Color::Indexed(114),
