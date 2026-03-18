@@ -68,7 +68,28 @@ enum AppEvent {
 /// Monotonic token used to cancel stale auto-advance requests.
 static AUTO_ADVANCE_TOKEN: AtomicU64 = AtomicU64::new(0);
 
+fn handle_command(cmd: &str) -> io::Result<()> {
+    match cmd {
+        "next" => bridge::next_track(),
+        "prev" | "previous" => bridge::previous_track(),
+        "play" | "pause" | "toggle" => bridge::play_pause(),
+        "shuffle" => bridge::toggle_shuffle(),
+        "favorite" | "fav" => bridge::toggle_favorite(),
+        _ => {
+            eprintln!("Unknown command: {cmd}");
+            eprintln!("Usage: muse [next|prev|play|shuffle|fav]");
+            std::process::exit(1);
+        }
+    }
+    Ok(())
+}
+
 fn main() -> io::Result<()> {
+    // Handle CLI subcommands (e.g. `muse next`, `muse prev`)
+    if let Some(cmd) = std::env::args().nth(1) {
+        return handle_command(&cmd);
+    }
+
     // Ensure Music.app is running and fetch initial state BEFORE entering raw mode.
     // NSAppleScript can behave unreliably when terminal is in raw mode.
     bridge::ensure_running();

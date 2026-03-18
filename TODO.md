@@ -1,6 +1,20 @@
 # TODO
 
-## Spotify Port
+## Now
+
+## Next
+
+## Later
+
+- [ ] Spotify port — define `MusicBackend` trait, refactor Apple Music behind it, implement Spotify backend via `reqwest`
+- [ ] OAuth 2.0 token flow (browser open → localhost callback → token storage)
+- [ ] Runtime backend selection (CLI flag or config file)
+- [ ] Cross-platform support (Linux/Windows) leveraging the Spotify backend
+- [ ] Device detection — check for active Spotify Connect devices instead of `music_ensure_running`/`music_is_running`
+
+---
+
+## Spotify Port — Reference
 
 Replace `bridge.rs` with a `spotify.rs` backend using Spotify's Web API (REST/HTTP via `reqwest`). The UI, state, and event loop stay nearly identical.
 
@@ -26,12 +40,4 @@ All needed functionality is supported by Spotify's Web API:
 
 ### Recommended Approach
 
-Define a `MusicBackend` trait, implement it for both Apple Music and Spotify, select at runtime via config/flag. The bridge surface is ~15 functions and the existing types (`Track`, `PlayerState`, `FullState`, etc.) work for both services.
-
-### Steps
-
-1. Define `MusicBackend` trait matching the current `bridge.rs` public API
-2. Refactor existing Apple Music code behind the trait
-3. Implement Spotify backend (`spotify.rs`) using `reqwest`
-4. Add OAuth 2.0 token flow (browser open → localhost callback → token storage)
-5. Add runtime backend selection (CLI flag or config file)
+Define a `MusicBackend` trait, implement it for both Apple Music and Spotify, select at runtime via config/flag. The bridge surface is ~15 functions and the existing types (`Track`, `PlayerState`, `FullState`, etc.) work for both service.

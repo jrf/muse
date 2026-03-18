@@ -129,9 +129,9 @@ fn draw_player_section(
         Constraint::Length(1), // [0] blank (top pad)
         Constraint::Length(1), // [1] track name
         Constraint::Length(1), // [2] artist — album
-        Constraint::Length(1), // [3] blank
-        Constraint::Length(1), // [4] progress bar
-        Constraint::Length(1), // [5] blank
+        Constraint::Length(0), // [3] blank
+        Constraint::Length(3), // [4] progress bar (bordered)
+        Constraint::Length(0), // [5] blank
         Constraint::Length(1), // [6] controls
         Constraint::Min(0),    // [7] remaining space (bottom pad)
     ])
@@ -177,7 +177,12 @@ fn draw_player_section(
         format_time(track.position),
         format_time(track.duration)
     );
+    let progress_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .border_style(Style::default().fg(theme.border));
     let gauge = Gauge::default()
+        .block(progress_block)
         .gauge_style(Style::default().fg(theme.accent))
         .ratio(progress)
         .label(Span::styled(
