@@ -27,3 +27,4 @@
 - [x] OAuth 2.0 PKCE flow (browser open → localhost:18234 callback → token cached at `~/.config/muse/spotify_token.json`)
 - [x] Runtime backend selection via `backend=spotify` in `~/.config/muse/config`
 - [x] Playback control, playlists, search, artwork, lyrics (LRCLIB), favorites, polling notifications
+- [x] Ctrl+F / Ctrl+B for page down/up navigation (vim-style)
