@@ -223,6 +223,20 @@ fn run_app(
     state.playlists = initial_playlists;
     let mut last_position_update = Instant::now();
 
+    // Restore queue from persisted state (playlist name + index)
+    if let Some((playlist_name, selected, _total)) = playlist::load_queue_state() {
+        let tracks = backend.get_playlist_tracks(&playlist_name);
+        if !tracks.is_empty() {
+            let sel = selected.min(tracks.len() - 1);
+            state.queue_playlist_name = playlist_name;
+            state.queue_tracks = tracks;
+            state.queue_selected = sel;
+            if sel >= PAGE_SIZE {
+                state.queue_scroll = sel.saturating_sub(3);
+            }
+        }
+    }
+
     // Load config
     load_config(&mut state, &mut current_theme);
 

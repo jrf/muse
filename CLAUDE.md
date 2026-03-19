@@ -25,7 +25,7 @@ cargo build --no-default-features --features spotify      # Spotify only (no Swi
 cargo build --no-default-features --features apple-music   # Apple Music only (no ureq/serde)
 ```
 
-The build process (defined in `build.rs`) compiles `swift-bridge/MusicBridge.swift` into a static library only when the `apple-music` feature is enabled. The `spotify` feature gates the `ureq`, `serde`, and `serde_json` dependencies.
+The build process (defined in `build.rs`) compiles `swift-bridge/MusicBridge.swift` into a static library only when the `apple-music` feature is enabled **and** the target is macOS. On non-macOS platforms, the Apple Music backend is automatically skipped even if the feature is enabled — `cargo build` just works on any OS. The `spotify` feature gates the `ureq`, `serde`, and `serde_json` dependencies.
 
 ## Architecture
 

@@ -29,3 +29,5 @@
 - [x] Feature flags: `--features apple-music` / `--features spotify` (both on by default, buildable independently)
 - [x] Removed auto-advance (was conflicting with Music.app's native playlist advancement)
 - [x] Fixed favorite toggle (split into separate read/write AppleScript calls)
+- [x] OS-aware build: Apple Music auto-skipped on non-macOS, no manual flags needed
+- [x] Queue restored on relaunch from persisted playlist state

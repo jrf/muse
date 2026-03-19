@@ -25,9 +25,8 @@ A terminal UI for controlling Apple Music and Spotify on macOS.
 
 ## Requirements
 
-- macOS 13+
-- Swift 6.2+ (for Apple Music backend)
-- Apple Music app (must be running) or Spotify account (Premium recommended)
+- **macOS**: Apple Music and/or Spotify. Swift 6.2+ required for Apple Music backend.
+- **Linux/Windows**: Spotify only. No additional dependencies.
 
 ## Install
 
@@ -37,7 +36,9 @@ cd muse
 just
 ```
 
-### Spotify-Only (no Xcode needed)
+On Linux, `cargo build --release` works out of the box — the Apple Music backend is automatically skipped on non-macOS platforms.
+
+### Spotify-Only (explicit, no Xcode needed)
 
 ```
 cargo build --release --no-default-features --features spotify
