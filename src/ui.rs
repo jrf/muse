@@ -9,7 +9,7 @@ use ratatui::{
 };
 use ratatui_image::{StatefulImage, protocol::StatefulProtocol};
 
-use crate::bridge::PlayerState;
+use crate::backend::PlayerState;
 use crate::state::{AppState, LibrarySubView, Tab};
 use crate::theme::Theme;
 

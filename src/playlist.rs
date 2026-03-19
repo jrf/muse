@@ -9,7 +9,7 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::bridge;
+use crate::backend::{MusicBackend, PlaylistTrack};
 
 // --- Queue state persistence ---
 
@@ -48,30 +48,30 @@ pub fn load_queue_state() -> Option<(String, usize, usize)> {
 // --- CLI playlist-aware navigation ---
 
 /// Handle `muse next` — advance within the current playlist if queue state exists,
-/// otherwise fall back to Music.app's global next.
-pub fn cli_next() {
+/// otherwise fall back to the backend's global next.
+pub fn cli_next(backend: &dyn MusicBackend) {
     if let Some((playlist, selected, total)) = load_queue_state() {
         if selected + 1 < total {
             let next_idx = selected + 1;
-            bridge::play_track_in_playlist(&playlist, next_idx as i32);
+            backend.play_track_in_playlist(&playlist, next_idx);
             save_queue_state(&playlist, next_idx, total);
         }
     } else {
-        bridge::next_track();
+        backend.next_track();
     }
 }
 
 /// Handle `muse prev` — go back within the current playlist if queue state exists,
-/// otherwise fall back to Music.app's global previous.
-pub fn cli_prev() {
+/// otherwise fall back to the backend's global previous.
+pub fn cli_prev(backend: &dyn MusicBackend) {
     if let Some((playlist, selected, total)) = load_queue_state() {
         if selected > 0 {
             let prev_idx = selected - 1;
-            bridge::play_track_in_playlist(&playlist, prev_idx as i32);
+            backend.play_track_in_playlist(&playlist, prev_idx);
             save_queue_state(&playlist, prev_idx, total);
         }
     } else {
-        bridge::previous_track();
+        backend.previous_track();
     }
 }
 
@@ -80,7 +80,7 @@ pub fn cli_prev() {
 /// When a new track notification arrives, find the matching track in the queue
 /// and update the selection. Returns the new index if a match was found.
 pub fn sync_queue_selection(
-    queue_tracks: &[bridge::PlaylistTrack],
+    queue_tracks: &[PlaylistTrack],
     queue_playlist_name: &str,
     track_name: &str,
     track_artist: &str,

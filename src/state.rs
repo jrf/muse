@@ -2,7 +2,7 @@
 
 use ratatui_image::protocol::StatefulProtocol;
 
-use crate::bridge;
+use crate::backend;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -55,20 +55,20 @@ pub enum LibrarySubView {
 
 pub struct AppState {
     // Player
-    pub track: Option<bridge::Track>,
+    pub track: Option<backend::Track>,
     pub artwork: Option<StatefulProtocol>,
     pub artwork_key: String,
-    pub player_state: bridge::PlayerState,
+    pub player_state: backend::PlayerState,
     pub volume: i32,
     pub shuffle_enabled: bool,
-    pub repeat_mode: bridge::RepeatMode,
+    pub repeat_mode: backend::RepeatMode,
     pub music_running: bool,
 
     // Tabs
     pub active_tab: Tab,
 
     // Queue
-    pub queue_tracks: Vec<bridge::PlaylistTrack>,
+    pub queue_tracks: Vec<backend::PlaylistTrack>,
     pub queue_selected: usize,
     pub queue_scroll: usize,
     pub queue_playlist_name: String,
@@ -78,18 +78,18 @@ pub struct AppState {
     pub library_sub_view: LibrarySubView,
     pub library_selected: usize,
     pub library_scroll: usize,
-    pub playlist_tracks: Vec<bridge::PlaylistTrack>,
+    pub playlist_tracks: Vec<backend::PlaylistTrack>,
     pub playlist_tracks_selected: usize,
     pub playlist_tracks_scroll: usize,
 
     // Search
     pub search_query: String,
-    pub search_results: Vec<bridge::SearchResult>,
+    pub search_results: Vec<backend::SearchResult>,
     pub search_selected: usize,
     pub search_scroll: usize,
 
     // Lyrics
-    pub lyrics_lines: Vec<bridge::LyricsLine>,
+    pub lyrics_lines: Vec<backend::LyricsLine>,
     pub lyrics_synced: bool,
     pub lyrics_scroll: usize,
     pub lyrics_manual_scroll: bool,
@@ -121,10 +121,10 @@ impl Default for AppState {
             track: None,
             artwork: None,
             artwork_key: String::new(),
-            player_state: bridge::PlayerState::Stopped,
+            player_state: backend::PlayerState::Stopped,
             volume: 50,
             shuffle_enabled: false,
-            repeat_mode: bridge::RepeatMode::Off,
+            repeat_mode: backend::RepeatMode::Off,
             music_running: true,
             active_tab: Tab::Queue,
             queue_tracks: Vec::new(),

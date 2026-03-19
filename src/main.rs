@@ -1,14 +1,15 @@
+mod backend;
 mod bridge;
 mod lastfm;
 mod playlist;
+mod spotify;
 mod state;
 mod theme;
 mod ui;
 
-use std::ffi::c_void;
 use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use crossterm::{
@@ -20,10 +21,24 @@ use image::ImageReader;
 use ratatui::prelude::*;
 use ratatui_image::picker::Picker;
 
+use backend::MusicBackend;
 use state::{AppState, LibrarySubView, Tab};
 use theme::Theme;
 
 const PAGE_SIZE: usize = 20;
+
+/// Map vim-style Ctrl key combos to equivalent navigation keys.
+fn normalize_nav_key(key: &KeyEvent) -> KeyCode {
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('f') => KeyCode::PageDown,
+            KeyCode::Char('b') => KeyCode::PageUp,
+            _ => key.code,
+        }
+    } else {
+        key.code
+    }
+}
 
 /// Navigate a list selection with scroll tracking. Returns (new_selected, new_scroll).
 fn list_nav(code: KeyCode, selected: usize, scroll: usize, len: usize) -> Option<(usize, usize)> {
@@ -55,12 +70,12 @@ fn list_nav(code: KeyCode, selected: usize, scroll: usize, len: usize) -> Option
 enum AppEvent {
     Key(KeyEvent),
     Tick,
-    MusicNotification(bridge::NotificationInfo),
-    StateRefreshed(bridge::FullState),
+    MusicNotification(backend::NotificationInfo),
+    StateRefreshed(backend::FullState),
     PlaylistsLoaded(Vec<String>),
-    PlaylistTracksLoaded(String, Vec<bridge::PlaylistTrack>),
-    SearchResults(String, Vec<bridge::SearchResult>),
-    LyricsLoaded(String, Option<bridge::LyricsResult>),
+    PlaylistTracksLoaded(String, Vec<backend::PlaylistTrack>),
+    SearchResults(String, Vec<backend::SearchResult>),
+    LyricsLoaded(String, Option<backend::LyricsResult>),
     ArtworkLoaded(String, ratatui_image::protocol::StatefulProtocol),
     AutoAdvance(u64),
     LastfmScrobbled,
@@ -69,13 +84,30 @@ enum AppEvent {
 /// Monotonic token used to cancel stale auto-advance requests.
 static AUTO_ADVANCE_TOKEN: AtomicU64 = AtomicU64::new(0);
 
-fn handle_command(cmd: &str) -> io::Result<()> {
+fn create_backend() -> Arc<dyn MusicBackend> {
+    let config = load_backend_config();
+    match config.as_deref() {
+        Some("spotify") => {
+            let client_id = load_spotify_client_id().unwrap_or_else(|| {
+                eprintln!(
+                    "Spotify backend requires spotify_client_id in ~/.config/muse/config\n\
+                     Get one at https://developer.spotify.com/dashboard"
+                );
+                std::process::exit(1);
+            });
+            Arc::new(spotify::SpotifyBackend::new(&client_id))
+        }
+        _ => Arc::new(bridge::AppleMusicBackend::new()),
+    }
+}
+
+fn handle_command(cmd: &str, backend: &dyn MusicBackend) -> io::Result<()> {
     match cmd {
-        "next" => playlist::cli_next(),
-        "prev" | "previous" => playlist::cli_prev(),
-        "play" | "pause" | "toggle" => bridge::play_pause(),
-        "shuffle" => bridge::toggle_shuffle(),
-        "favorite" | "fav" => bridge::toggle_favorite(),
+        "next" => playlist::cli_next(backend),
+        "prev" | "previous" => playlist::cli_prev(backend),
+        "play" | "pause" | "toggle" => backend.play_pause(),
+        "shuffle" => backend.toggle_shuffle(),
+        "favorite" | "fav" => backend.toggle_favorite(),
         _ => {
             eprintln!("Unknown command: {cmd}");
             eprintln!("Usage: muse [next|prev|play|shuffle|fav]");
@@ -86,16 +118,17 @@ fn handle_command(cmd: &str) -> io::Result<()> {
 }
 
 fn main() -> io::Result<()> {
+    let backend = create_backend();
+
     // Handle CLI subcommands (e.g. `muse next`, `muse prev`)
     if let Some(cmd) = std::env::args().nth(1) {
-        return handle_command(&cmd);
+        return handle_command(&cmd, &*backend);
     }
 
-    // Ensure Music.app is running and fetch initial state BEFORE entering raw mode.
-    // NSAppleScript can behave unreliably when terminal is in raw mode.
-    bridge::ensure_running();
-    let initial_state = bridge::fetch_state();
-    let initial_playlists = bridge::get_playlists();
+    // Ensure music service is running and fetch initial state BEFORE entering raw mode.
+    backend.ensure_running();
+    let initial_state = backend.fetch_state();
+    let initial_playlists = backend.get_playlists();
 
     // Detect image protocol before entering raw mode (queries terminal)
     // Falls back to halfblocks (unicode) if terminal doesn't support Sixel/Kitty/iTerm2
@@ -103,9 +136,9 @@ fn main() -> io::Result<()> {
         Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks()),
     );
 
-    // Fetch initial artwork before raw mode (NSAppleScript is more reliable here)
+    // Fetch initial artwork before raw mode
     let initial_artwork = if let (Some(_), Some(ref picker)) = (&initial_state.track, &picker) {
-        fetch_artwork(picker)
+        fetch_artwork(picker, &*backend)
     } else {
         None
     };
@@ -119,8 +152,8 @@ fn main() -> io::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, crossterm::cursor::Hide)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    let ratatui_backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(ratatui_backend)?;
 
     let result = run_app(
         &mut terminal,
@@ -129,6 +162,7 @@ fn main() -> io::Result<()> {
         initial_playlists,
         initial_artwork,
         initial_artwork_key,
+        backend,
     );
 
     // Restore terminal
@@ -145,10 +179,11 @@ fn main() -> io::Result<()> {
 fn run_app(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     picker: Option<Picker>,
-    initial_state: bridge::FullState,
+    initial_state: backend::FullState,
     initial_playlists: Vec<String>,
     initial_artwork: Option<ratatui_image::protocol::StatefulProtocol>,
     initial_artwork_key: String,
+    backend: Arc<dyn MusicBackend>,
 ) -> io::Result<()> {
     let (tx, rx) = mpsc::channel::<AppEvent>();
 
@@ -164,7 +199,7 @@ fn run_app(
     state.artwork_key = initial_artwork_key;
 
     // Apply the initial state fetched before raw mode
-    apply_fresh_state(&mut state, &initial_state, &picker, &tx);
+    apply_fresh_state(&mut state, &initial_state, &picker, &tx, &backend);
     state.playlists = initial_playlists;
     let mut last_position_update = Instant::now();
 
@@ -178,11 +213,23 @@ fn run_app(
         state.lastfm_status = "last.fm".to_string();
     }
 
-    // Register notification callback — sends events to the channel
+    // Set up notification delivery from the backend
     {
         let tx_notify = tx.clone();
-        NOTIFICATION_TX.lock().unwrap().replace(tx_notify);
-        bridge::register_notification_callback(notification_callback);
+        let (notify_tx, notify_rx) = mpsc::channel::<backend::NotificationInfo>();
+        backend.setup_notifications(notify_tx);
+
+        // Bridge thread: forward backend notifications to AppEvent channel
+        std::thread::spawn(move || {
+            for info in notify_rx {
+                if tx_notify
+                    .send(AppEvent::MusicNotification(info))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
     }
 
     // Spawn input thread
@@ -215,20 +262,21 @@ fn run_app(
         match rx.recv_timeout(Duration::from_millis(50)) {
             Ok(event) => match event {
                 AppEvent::Key(key) => {
-                    if handle_key(key, &mut state, &mut current_theme, &tx) {
+                    if handle_key(key, &mut state, &mut current_theme, &tx, &backend) {
                         return Ok(());
                     }
                 }
                 AppEvent::Tick => {
-                    // Pump the RunLoop on the main thread for notifications
-                    bridge::pump_runloop();
+                    // Let backend do periodic main-thread work (e.g. pump RunLoop)
+                    backend.tick();
 
                     // Periodic state refresh
                     if last_refresh.elapsed() >= refresh_interval {
                         last_refresh = Instant::now();
                         let tx2 = tx.clone();
+                        let b = backend.clone();
                         std::thread::spawn(move || {
-                            let fresh = bridge::fetch_state();
+                            let fresh = b.fetch_state();
                             let _ = tx2.send(AppEvent::StateRefreshed(fresh));
                         });
                     }
@@ -249,7 +297,7 @@ fn run_app(
                     }
                 }
                 AppEvent::MusicNotification(info) => {
-                    handle_notification(&mut state, &info, &picker, &tx);
+                    handle_notification(&mut state, &info, &picker, &tx, &backend);
                     last_position_update = Instant::now();
 
                     // Last.fm: track play state changes
@@ -294,8 +342,9 @@ fn run_app(
                             let tx2 = tx.clone();
                             let name = info.name.clone();
                             let artist = info.artist.clone();
+                            let b = backend.clone();
                             std::thread::spawn(move || {
-                                let result = bridge::get_lyrics(&name, &artist);
+                                let result = b.get_lyrics(&name, &artist);
                                 let _ = tx2.send(AppEvent::LyricsLoaded(lyrics_key, result));
                             });
                         }
@@ -303,14 +352,15 @@ fn run_app(
                 }
                 AppEvent::StateRefreshed(fresh) => {
                     let was_not_running = !state.music_running;
-                    apply_fresh_state(&mut state, &fresh, &picker, &tx);
+                    apply_fresh_state(&mut state, &fresh, &picker, &tx, &backend);
                     last_position_update = Instant::now();
 
-                    // When Music.app transitions to running, load playlists
+                    // When music service transitions to running, load playlists
                     if was_not_running && state.music_running && state.playlists.is_empty() {
                         let tx2 = tx.clone();
+                        let b = backend.clone();
                         std::thread::spawn(move || {
-                            let playlists = bridge::get_playlists();
+                            let playlists = b.get_playlists();
                             let _ = tx2.send(AppEvent::PlaylistsLoaded(playlists));
                         });
                     }
@@ -362,8 +412,8 @@ fn run_app(
                         state.queue_scroll = next_idx.saturating_sub(3);
                         playlist::save_queue_state(&state.queue_playlist_name, next_idx, state.queue_tracks.len());
                         let playlist = state.queue_playlist_name.clone();
-                        fire_and_refresh(&tx, move || {
-                            bridge::play_track_in_playlist(&playlist, next_idx as i32)
+                        fire_and_refresh(&backend, &tx, move |b| {
+                            b.play_track_in_playlist(&playlist, next_idx)
                         });
                     }
                 }
@@ -374,28 +424,18 @@ fn run_app(
     }
 }
 
-// Global sender for the C notification callback
-use std::sync::Mutex;
-static NOTIFICATION_TX: Mutex<Option<mpsc::Sender<AppEvent>>> = Mutex::new(None);
-
-extern "C" fn notification_callback(ptr: *mut c_void) {
-    let parsed = bridge::parse_notification(ptr);
-    if let Some(tx) = NOTIFICATION_TX.lock().unwrap().as_ref() {
-        let _ = tx.send(AppEvent::MusicNotification(parsed));
-    }
-}
-
 fn apply_fresh_state(
     state: &mut AppState,
-    fresh: &bridge::FullState,
+    fresh: &backend::FullState,
     picker: &Option<std::sync::Arc<Picker>>,
     tx: &mpsc::Sender<AppEvent>,
+    backend: &Arc<dyn MusicBackend>,
 ) {
     let old_art_key = state.artwork_key.clone();
 
     // Don't flip to "not running" if we were previously running — could be a
-    // transient AppleScript error during track transitions.  Only mark not
-    // running if we also had no track before (i.e. we never connected).
+    // transient error during track transitions.  Only mark not running if we
+    // also had no track before (i.e. we never connected).
     if fresh.music_running || !state.music_running {
         state.music_running = fresh.music_running;
     }
@@ -430,8 +470,9 @@ fn apply_fresh_state(
         if let Some(ref picker) = picker {
             let tx2 = tx.clone();
             let picker = picker.clone();
+            let b = backend.clone();
             std::thread::spawn(move || {
-                if let Some(proto) = fetch_artwork(&picker) {
+                if let Some(proto) = fetch_artwork(&picker, &*b) {
                     let _ = tx2.send(AppEvent::ArtworkLoaded(new_art_key, proto));
                 }
             });
@@ -485,7 +526,7 @@ fn interpolated_state(state: &AppState, last_update: &Instant) -> AppState {
     };
 
     // Interpolate position when playing
-    if state.player_state == bridge::PlayerState::Playing {
+    if state.player_state == backend::PlayerState::Playing {
         if let Some(ref mut track) = display.track {
             let elapsed = last_update.elapsed().as_secs_f64();
             track.position = (track.position + elapsed).min(track.duration);
@@ -518,23 +559,24 @@ fn interpolated_state(state: &AppState, last_update: &Instant) -> AppState {
 
 fn handle_notification(
     state: &mut AppState,
-    info: &bridge::NotificationInfo,
+    info: &backend::NotificationInfo,
     picker: &Option<std::sync::Arc<Picker>>,
     tx: &mpsc::Sender<AppEvent>,
+    backend: &Arc<dyn MusicBackend>,
 ) {
     match info.player_state.as_str() {
         "Playing" => {
-            state.player_state = bridge::PlayerState::Playing;
+            state.player_state = backend::PlayerState::Playing;
             // Cancel any pending auto-advance
             AUTO_ADVANCE_TOKEN.fetch_add(1, Ordering::SeqCst);
         }
-        "Paused" => state.player_state = bridge::PlayerState::Paused,
+        "Paused" => state.player_state = backend::PlayerState::Paused,
         "Stopped" => {
             // Don't immediately clear — may be a transient transition.
             // Only update player state if there's no track name coming
             // (i.e. this is genuinely the end of playback, not a transition).
             if info.name.is_empty() {
-                state.player_state = bridge::PlayerState::Stopped;
+                state.player_state = backend::PlayerState::Stopped;
                 // Schedule auto-advance if there are more tracks in the queue
                 if !state.queue_tracks.is_empty()
                     && state.queue_selected + 1 < state.queue_tracks.len()
@@ -559,7 +601,7 @@ fn handle_notification(
             .as_ref()
             .map_or(true, |t| t.name != info.name || t.artist != info.artist);
 
-        state.track = Some(bridge::Track {
+        state.track = Some(backend::Track {
             name: info.name.clone(),
             artist: info.artist.clone(),
             album: info.album.clone(),
@@ -594,8 +636,9 @@ fn handle_notification(
                 if let Some(ref picker) = picker {
                     let tx2 = tx.clone();
                     let picker = picker.clone();
+                    let b = backend.clone();
                     std::thread::spawn(move || {
-                        if let Some(proto) = fetch_artwork(&picker) {
+                        if let Some(proto) = fetch_artwork(&picker, &*b) {
                             let _ = tx2.send(AppEvent::ArtworkLoaded(new_key, proto));
                         }
                     });
@@ -613,6 +656,7 @@ fn handle_key(
     state: &mut AppState,
     theme: &mut Theme,
     tx: &mpsc::Sender<AppEvent>,
+    backend: &Arc<dyn MusicBackend>,
 ) -> bool {
     // Help overlay
     if key.code == KeyCode::Char('?') {
@@ -626,7 +670,7 @@ fn handle_key(
 
     // Playlist picker
     if state.show_playlist_picker {
-        handle_playlist_picker_key(key, state, tx);
+        handle_playlist_picker_key(key, state, tx, backend);
         return false;
     }
 
@@ -672,46 +716,48 @@ fn handle_key(
             return false;
         }
         KeyCode::Char(' ') if !in_search => {
-            state.player_state = if state.player_state == bridge::PlayerState::Playing {
-                bridge::PlayerState::Paused
+            state.player_state = if state.player_state == backend::PlayerState::Playing {
+                backend::PlayerState::Paused
             } else {
-                bridge::PlayerState::Playing
+                backend::PlayerState::Playing
             };
-            fire_and_refresh(tx, || bridge::play_pause());
+            fire_and_refresh(backend, tx, |b| b.play_pause());
             return false;
         }
         KeyCode::Char('n') if !in_search => {
-            fire_and_refresh(tx, || bridge::next_track());
+            fire_and_refresh(backend, tx, |b| b.next_track());
             return false;
         }
         KeyCode::Char('p') if !in_search => {
-            fire_and_refresh(tx, || bridge::previous_track());
+            fire_and_refresh(backend, tx, |b| b.previous_track());
             return false;
         }
         KeyCode::Char('+') | KeyCode::Char('=') => {
             state.volume = (state.volume + 5).min(100);
             let vol = state.volume;
-            std::thread::spawn(move || bridge::set_volume(vol));
+            let b = backend.clone();
+            std::thread::spawn(move || b.set_volume(vol));
             return false;
         }
         KeyCode::Char('-') if !in_search => {
             state.volume = (state.volume - 5).max(0);
             let vol = state.volume;
-            std::thread::spawn(move || bridge::set_volume(vol));
+            let b = backend.clone();
+            std::thread::spawn(move || b.set_volume(vol));
             return false;
         }
         KeyCode::Char('s') if !in_search => {
             state.shuffle_enabled = !state.shuffle_enabled;
-            fire_and_refresh(tx, || bridge::toggle_shuffle());
+            fire_and_refresh(backend, tx, |b| b.toggle_shuffle());
             return false;
         }
         KeyCode::Char('r') if !in_search => {
             state.repeat_mode = match state.repeat_mode {
-                bridge::RepeatMode::Off => bridge::RepeatMode::All,
-                bridge::RepeatMode::All => bridge::RepeatMode::One,
-                bridge::RepeatMode::One => bridge::RepeatMode::Off,
+                backend::RepeatMode::Off => backend::RepeatMode::All,
+                backend::RepeatMode::All => backend::RepeatMode::One,
+                backend::RepeatMode::One => backend::RepeatMode::Off,
             };
-            fire_and_refresh(tx, || bridge::cycle_repeat());
+            fire_and_refresh(backend, tx, |b| b.cycle_repeat());
             return false;
         }
         KeyCode::Char('C') if !in_search => {
@@ -722,9 +768,9 @@ fn handle_key(
             playlist::clear_queue_state();
             return false;
         }
-        KeyCode::Char('f') if !in_search => {
+        KeyCode::Char('f') if !in_search && !key.modifiers.contains(KeyModifiers::CONTROL) => {
             state.current_track_favorited = !state.current_track_favorited;
-            fire_and_refresh(tx, || bridge::toggle_favorite());
+            fire_and_refresh(backend, tx, |b| b.toggle_favorite());
             return false;
         }
         KeyCode::Char('P') if !in_search => {
@@ -740,7 +786,7 @@ fn handle_key(
                     state.search_query = artist;
                     state.search_selected = 0;
                     state.search_scroll = 0;
-                    perform_search(state, tx);
+                    perform_search(state, tx, backend);
                 }
             }
             return false;
@@ -752,7 +798,7 @@ fn handle_key(
                     state.search_query = album;
                     state.search_selected = 0;
                     state.search_scroll = 0;
-                    perform_search(state, tx);
+                    perform_search(state, tx, backend);
                 }
             }
             return false;
@@ -760,7 +806,8 @@ fn handle_key(
         KeyCode::Char('o') if !in_search => {
             if let Some(artist) = state.track.as_ref().map(|t| t.artist.clone()) {
                 if !artist.is_empty() {
-                    std::thread::spawn(move || bridge::reveal_artist(&artist));
+                    let b = backend.clone();
+                    std::thread::spawn(move || b.reveal_artist(&artist));
                 }
             }
             return false;
@@ -768,8 +815,9 @@ fn handle_key(
         KeyCode::Char('O') if !in_search => {
             if let Some(track) = state.track.clone() {
                 if !track.album.is_empty() {
+                    let b = backend.clone();
                     std::thread::spawn(move || {
-                        bridge::reveal_album(&track.album, &track.artist)
+                        b.reveal_album(&track.album, &track.artist)
                     });
                 }
             }
@@ -780,9 +828,9 @@ fn handle_key(
 
     // Tab-specific keys
     match state.active_tab {
-        Tab::Queue => handle_queue_key(key, state, tx),
-        Tab::Library => handle_library_key(key, state, tx),
-        Tab::Search => handle_search_key(key, state, tx),
+        Tab::Queue => handle_queue_key(key, state, tx, backend),
+        Tab::Library => handle_library_key(key, state, tx, backend),
+        Tab::Search => handle_search_key(key, state, tx, backend),
         Tab::Lyrics => handle_lyrics_key(key, state),
         Tab::Themes => handle_themes_key(key, state, theme),
     }
@@ -790,8 +838,8 @@ fn handle_key(
     false
 }
 
-fn handle_queue_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppEvent>) {
-    if let Some((sel, scr)) = list_nav(key.code, state.queue_selected, state.queue_scroll, state.queue_tracks.len()) {
+fn handle_queue_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppEvent>, backend: &Arc<dyn MusicBackend>) {
+    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key), state.queue_selected, state.queue_scroll, state.queue_tracks.len()) {
         state.queue_selected = sel;
         state.queue_scroll = scr;
         return;
@@ -801,18 +849,18 @@ fn handle_queue_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppEv
             if !state.queue_tracks.is_empty() && state.queue_selected < state.queue_tracks.len() {
                 playlist::save_queue_state(&state.queue_playlist_name, state.queue_selected, state.queue_tracks.len());
                 let playlist = state.queue_playlist_name.clone();
-                let idx = state.queue_selected as i32;
-                fire_and_refresh(tx, move || bridge::play_track_in_playlist(&playlist, idx));
+                let idx = state.queue_selected;
+                fire_and_refresh(backend, tx, move |b| b.play_track_in_playlist(&playlist, idx));
             }
         }
         _ => {}
     }
 }
 
-fn handle_library_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppEvent>) {
+fn handle_library_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppEvent>, backend: &Arc<dyn MusicBackend>) {
     match &state.library_sub_view {
         LibrarySubView::Playlists => {
-            if let Some((sel, scr)) = list_nav(key.code, state.library_selected, state.library_scroll, state.playlists.len()) {
+            if let Some((sel, scr)) = list_nav(normalize_nav_key(&key), state.library_selected, state.library_scroll, state.playlists.len()) {
                 state.library_selected = sel;
                 state.library_scroll = scr;
                 return;
@@ -826,8 +874,9 @@ fn handle_library_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<App
                     state.playlist_tracks_selected = 0;
                     state.playlist_tracks_scroll = 0;
                     let tx2 = tx.clone();
+                    let b = backend.clone();
                     std::thread::spawn(move || {
-                        let tracks = bridge::get_playlist_tracks(&name);
+                        let tracks = b.get_playlist_tracks(&name);
                         let _ = tx2.send(AppEvent::PlaylistTracksLoaded(name, tracks));
                     });
                 }
@@ -836,7 +885,7 @@ fn handle_library_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<App
             }
         }
         LibrarySubView::Tracks(_) => {
-            if let Some((sel, scr)) = list_nav(key.code, state.playlist_tracks_selected, state.playlist_tracks_scroll, state.playlist_tracks.len()) {
+            if let Some((sel, scr)) = list_nav(normalize_nav_key(&key), state.playlist_tracks_selected, state.playlist_tracks_scroll, state.playlist_tracks.len()) {
                 state.playlist_tracks_selected = sel;
                 state.playlist_tracks_scroll = scr;
                 return;
@@ -857,8 +906,8 @@ fn handle_library_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<App
                         state.queue_scroll = idx.saturating_sub(3);
                         playlist::save_queue_state(playlist_name, idx, state.playlist_tracks.len());
                         let name = playlist_name.clone();
-                        fire_and_refresh(tx, move || {
-                            bridge::play_track_in_playlist(&name, idx as i32)
+                        fire_and_refresh(backend, tx, move |b| {
+                            b.play_track_in_playlist(&name, idx)
                         });
                     }
                 }
@@ -869,8 +918,8 @@ fn handle_library_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<App
     }
 }
 
-fn handle_search_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppEvent>) {
-    if let Some((sel, scr)) = list_nav(key.code, state.search_selected, state.search_scroll, state.search_results.len()) {
+fn handle_search_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppEvent>, backend: &Arc<dyn MusicBackend>) {
+    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key), state.search_selected, state.search_scroll, state.search_results.len()) {
         state.search_selected = sel;
         state.search_scroll = scr;
         return;
@@ -879,7 +928,7 @@ fn handle_search_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppE
         KeyCode::Backspace => {
             if !state.search_query.is_empty() {
                 state.search_query.pop();
-                perform_search(state, tx);
+                perform_search(state, tx, backend);
             } else {
                 state.search_results.clear();
                 state.search_selected = 0;
@@ -891,7 +940,7 @@ fn handle_search_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppE
                 && state.search_selected < state.search_results.len()
             {
                 let result = state.search_results[state.search_selected].clone();
-                fire_and_refresh(tx, move || bridge::play_track(&result.name, &result.artist));
+                fire_and_refresh(backend, tx, move |b| b.play_track(&result.name, &result.artist));
             }
         }
         KeyCode::Char(ch) => {
@@ -899,7 +948,7 @@ fn handle_search_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppE
                 state.search_query.push(ch);
                 state.search_selected = 0;
                 state.search_scroll = 0;
-                perform_search(state, tx);
+                perform_search(state, tx, backend);
             }
         }
         _ => {}
@@ -907,7 +956,7 @@ fn handle_search_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppE
 }
 
 fn handle_lyrics_key(key: KeyEvent, state: &mut AppState) {
-    match key.code {
+    match normalize_nav_key(&key) {
         KeyCode::Up => {
             if state.lyrics_scroll > 0 {
                 state.lyrics_scroll -= 1;
@@ -943,7 +992,7 @@ fn handle_lyrics_key(key: KeyEvent, state: &mut AppState) {
 }
 
 fn handle_themes_key(key: KeyEvent, state: &mut AppState, theme: &mut Theme) {
-    if let Some((sel, scr)) = list_nav(key.code, state.theme_selected, state.theme_scroll, theme::ALL_THEMES.len()) {
+    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key), state.theme_selected, state.theme_scroll, theme::ALL_THEMES.len()) {
         state.theme_selected = sel;
         state.theme_scroll = scr;
         preview_theme(state, theme);
@@ -962,8 +1011,8 @@ fn handle_themes_key(key: KeyEvent, state: &mut AppState, theme: &mut Theme) {
     }
 }
 
-fn handle_playlist_picker_key(key: KeyEvent, state: &mut AppState, _tx: &mpsc::Sender<AppEvent>) {
-    if let Some((sel, scr)) = list_nav(key.code, state.playlist_picker_selected, state.playlist_picker_scroll, state.playlists.len()) {
+fn handle_playlist_picker_key(key: KeyEvent, state: &mut AppState, _tx: &mpsc::Sender<AppEvent>, backend: &Arc<dyn MusicBackend>) {
+    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key), state.playlist_picker_selected, state.playlist_picker_scroll, state.playlists.len()) {
         state.playlist_picker_selected = sel;
         state.playlist_picker_scroll = scr;
         return;
@@ -975,7 +1024,8 @@ fn handle_playlist_picker_key(key: KeyEvent, state: &mut AppState, _tx: &mpsc::S
             {
                 let name = state.playlists[state.playlist_picker_selected].clone();
                 state.show_playlist_picker = false;
-                std::thread::spawn(move || bridge::add_to_playlist(&name));
+                let b = backend.clone();
+                std::thread::spawn(move || b.add_to_playlist(&name));
             }
         }
         KeyCode::Esc | KeyCode::Backspace | KeyCode::Char('P') => {
@@ -997,22 +1047,23 @@ fn restore_saved_theme(state: &AppState, theme: &mut Theme) {
     }
 }
 
-fn perform_search(state: &AppState, tx: &mpsc::Sender<AppEvent>) {
+fn perform_search(state: &AppState, tx: &mpsc::Sender<AppEvent>, backend: &Arc<dyn MusicBackend>) {
     let query = state.search_query.clone();
     if query.len() < 2 {
         return;
     }
     let tx2 = tx.clone();
+    let b = backend.clone();
     std::thread::spawn(move || {
-        let results = bridge::search(&query);
+        let results = b.search(&query);
         let _ = tx2.send(AppEvent::SearchResults(query, results));
     });
 }
 
-fn fetch_artwork(picker: &Picker) -> Option<ratatui_image::protocol::StatefulProtocol> {
-    // Retry a few times — NSAppleScript can fail intermittently from background threads
+fn fetch_artwork(picker: &Picker, backend: &dyn MusicBackend) -> Option<ratatui_image::protocol::StatefulProtocol> {
+    // Retry a few times — backend calls can fail intermittently
     for _ in 0..3 {
-        if let Some(data) = bridge::get_artwork_data() {
+        if let Some(data) = backend.get_artwork_data() {
             if let Ok(reader) = ImageReader::new(std::io::Cursor::new(data)).with_guessed_format() {
                 if let Ok(img) = reader.decode() {
                     return Some(picker.new_resize_protocol(img));
@@ -1024,14 +1075,18 @@ fn fetch_artwork(picker: &Picker) -> Option<ratatui_image::protocol::StatefulPro
     None
 }
 
-fn fire_and_refresh<F: FnOnce() + Send + 'static>(tx: &mpsc::Sender<AppEvent>, action: F) {
+fn fire_and_refresh<F: FnOnce(&dyn MusicBackend) + Send + 'static>(
+    backend: &Arc<dyn MusicBackend>,
+    tx: &mpsc::Sender<AppEvent>,
+    action: F,
+) {
     let tx2 = tx.clone();
+    let b = backend.clone();
     std::thread::spawn(move || {
-        action();
-        // Give Music.app time to start the new track before fetching state.
-        // Without this delay, fetch_state returns stale/empty data during transitions.
+        action(&*b);
+        // Give the music service time to update before fetching state.
         std::thread::sleep(Duration::from_millis(500));
-        let fresh = bridge::fetch_state();
+        let fresh = b.fetch_state();
         let _ = tx2.send(AppEvent::StateRefreshed(fresh));
     });
 }
@@ -1070,8 +1125,46 @@ fn load_config(state: &mut AppState, theme: &mut Theme) {
     }
 }
 
+fn load_backend_config() -> Option<String> {
+    let contents = std::fs::read_to_string(config_file()).ok()?;
+    for line in contents.lines() {
+        let parts: Vec<&str> = line.splitn(2, '=').collect();
+        if parts.len() == 2 && parts[0].trim() == "backend" {
+            return Some(parts[1].trim().to_string());
+        }
+    }
+    None
+}
+
+fn load_spotify_client_id() -> Option<String> {
+    let contents = std::fs::read_to_string(config_file()).ok()?;
+    for line in contents.lines() {
+        let parts: Vec<&str> = line.splitn(2, '=').collect();
+        if parts.len() == 2 && parts[0].trim() == "spotify_client_id" {
+            let val = parts[1].trim().to_string();
+            if !val.is_empty() {
+                return Some(val);
+            }
+        }
+    }
+    None
+}
+
 fn save_theme(name: &str) {
     let dir = config_dir();
     let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(config_file(), format!("theme={}\n", name));
+
+    // Preserve existing config lines, only update theme
+    let path = config_file();
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut lines: Vec<String> = existing
+        .lines()
+        .filter(|l| {
+            let parts: Vec<&str> = l.splitn(2, '=').collect();
+            parts.len() != 2 || parts[0].trim() != "theme"
+        })
+        .map(|l| l.to_string())
+        .collect();
+    lines.push(format!("theme={}", name));
+    let _ = std::fs::write(path, lines.join("\n") + "\n");
 }
