@@ -625,12 +625,12 @@ fn handle_notification(
                 state.player_state = backend::PlayerState::Paused;
             }
 
-            // Auto-advance when a track finishes naturally.
+            // Auto-advance for Apple Music when a track finishes naturally.
             // Guard: was_playing prevents re-entry (state is already
             // updated above so a second notification won't fire again).
-            if was_playing && is_same_track && near_end {
-                if backend.needs_queue_advance()
-                    && !state.queue_tracks.is_empty()
+            // Spotify manages its own queue natively — no intervention needed.
+            if was_playing && is_same_track && near_end && backend.needs_queue_advance() {
+                if !state.queue_tracks.is_empty()
                     && state.queue_selected + 1 < state.queue_tracks.len()
                 {
                     // Advance our internal queue
@@ -644,8 +644,7 @@ fn handle_notification(
                         b.play_track_in_playlist(&playlist, next_idx)
                     });
                 } else {
-                    // No internal queue — tell the backend to advance
-                    // (e.g. Music.app sometimes stalls at end-of-track)
+                    // No internal queue — nudge Music.app to advance
                     fire_and_refresh(backend, tx, |b| b.next_track());
                 }
             }
