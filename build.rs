@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
-    // Only compile Swift bridge when apple-music feature is enabled
-    if env::var("CARGO_FEATURE_APPLE_MUSIC").is_err() {
+    // Only compile Swift bridge on macOS with apple-music feature enabled
+    if env::var("CARGO_FEATURE_APPLE_MUSIC").is_err() || !cfg!(target_os = "macos") {
         return;
     }
 

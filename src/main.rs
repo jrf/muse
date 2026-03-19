@@ -1,5 +1,5 @@
 mod backend;
-#[cfg(feature = "apple-music")]
+#[cfg(all(feature = "apple-music", target_os = "macos"))]
 mod bridge;
 mod lastfm;
 mod playlist;
@@ -111,7 +111,7 @@ fn create_backend() -> Arc<dyn MusicBackend> {
             eprintln!("Spotify support not compiled in. Build with: cargo build --features spotify");
             std::process::exit(1);
         }
-        #[cfg(feature = "apple-music")]
+        #[cfg(all(feature = "apple-music", target_os = "macos"))]
         _ => Arc::new(bridge::AppleMusicBackend::new()),
         #[cfg(not(feature = "apple-music"))]
         _ => {
