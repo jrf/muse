@@ -466,7 +466,22 @@ fn apply_fresh_state(
         // Only update track/player_state with concrete data.
         // During transitions, keep showing the previous track.
         if let Some(ref track) = fresh.track {
-            state.track = Some(track.clone());
+            // If track just finished (same track, near end, no longer playing),
+            // snap position to duration so the progress bar shows completion.
+            let was_playing = state.player_state == backend::PlayerState::Playing;
+            let is_no_longer_playing = fresh.player_state != backend::PlayerState::Playing;
+            let is_same_track = state
+                .track
+                .as_ref()
+                .map_or(false, |t| t.name == track.name && t.artist == track.artist);
+            let near_end = track.duration > 0.0 && (track.duration - track.position) < 5.0;
+
+            let mut updated_track = track.clone();
+            if was_playing && is_no_longer_playing && is_same_track && near_end {
+                updated_track.position = updated_track.duration;
+            }
+
+            state.track = Some(updated_track);
             state.player_state = fresh.player_state;
         } else if state.track.is_none() {
             // No previous track either — show whatever state we got
@@ -584,13 +599,30 @@ fn handle_notification(
 ) {
     match info.player_state.as_str() {
         "Playing" => state.player_state = backend::PlayerState::Playing,
-        "Paused" => state.player_state = backend::PlayerState::Paused,
-        "Stopped" => {
-            // Don't immediately clear — may be a transient transition.
-            // Only update player state if there's no track name coming
-            // (i.e. this is genuinely the end of playback, not a transition).
-            if info.name.is_empty() {
+        "Paused" | "Stopped" => {
+            let is_same_track = !info.name.is_empty()
+                && state
+                    .track
+                    .as_ref()
+                    .map_or(false, |t| t.name == info.name && t.artist == info.artist);
+
+            // If same track and position is near the end, this is a natural
+            // track completion — snap position to duration so the progress
+            // bar shows the track as finished.
+            if is_same_track {
+                if let Some(ref mut t) = state.track {
+                    if t.duration > 0.0 && (t.duration - t.position) < 5.0 {
+                        t.position = t.duration;
+                    }
+                }
+            }
+
+            if info.player_state == "Stopped" && !info.name.is_empty() {
+                // Don't immediately mark stopped during transitions
+            } else if info.player_state == "Stopped" {
                 state.player_state = backend::PlayerState::Stopped;
+            } else {
+                state.player_state = backend::PlayerState::Paused;
             }
         }
         _ => {}
