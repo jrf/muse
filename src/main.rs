@@ -10,6 +10,7 @@ mod theme;
 mod ui;
 
 use std::io;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
@@ -88,9 +89,12 @@ enum AppEvent {
     SearchResults(String, Vec<backend::SearchResult>),
     LyricsLoaded(String, Option<backend::LyricsResult>),
     ArtworkLoaded(String, ratatui_image::protocol::StatefulProtocol),
+    AutoAdvance(u64),
     LastfmScrobbled,
 }
 
+/// Monotonic token used to cancel stale auto-advance requests.
+static AUTO_ADVANCE_TOKEN: AtomicU64 = AtomicU64::new(0);
 
 fn create_backend() -> Arc<dyn MusicBackend> {
     let config = load_backend_config();
@@ -432,6 +436,25 @@ fn run_app(
                         state.artwork = Some(proto);
                     }
                 }
+                AppEvent::AutoAdvance(token) => {
+                    // Only advance if the token is still current (not cancelled)
+                    if token == AUTO_ADVANCE_TOKEN.load(Ordering::SeqCst)
+                        && !state.queue_tracks.is_empty()
+                        && state.queue_selected + 1 < state.queue_tracks.len()
+                    {
+                        let next_idx = state.queue_selected + 1;
+                        state.queue_selected = next_idx;
+                        if next_idx >= state.queue_scroll + PAGE_SIZE {
+                            state.queue_scroll = next_idx.saturating_sub(3);
+                        }
+                        let playlist = state.queue_playlist_name.clone();
+                        let b = backend.clone();
+                        let tx2 = tx.clone();
+                        fire_and_refresh(&b, &tx2, move |b| {
+                            b.play_track_in_playlist(&playlist, next_idx)
+                        });
+                    }
+                }
                 AppEvent::LastfmScrobbled => {
                     state.lastfm_status = "last.fm ✓".to_string();
                 }
@@ -466,22 +489,7 @@ fn apply_fresh_state(
         // Only update track/player_state with concrete data.
         // During transitions, keep showing the previous track.
         if let Some(ref track) = fresh.track {
-            // If track just finished (same track, near end, no longer playing),
-            // snap position to duration so the progress bar shows completion.
-            let was_playing = state.player_state == backend::PlayerState::Playing;
-            let is_no_longer_playing = fresh.player_state != backend::PlayerState::Playing;
-            let is_same_track = state
-                .track
-                .as_ref()
-                .map_or(false, |t| t.name == track.name && t.artist == track.artist);
-            let near_end = track.duration > 0.0 && (track.duration - track.position) < 5.0;
-
-            let mut updated_track = track.clone();
-            if was_playing && is_no_longer_playing && is_same_track && near_end {
-                updated_track.position = updated_track.duration;
-            }
-
-            state.track = Some(updated_track);
+            state.track = Some(track.clone());
             state.player_state = fresh.player_state;
         } else if state.track.is_none() {
             // No previous track either — show whatever state we got
@@ -598,31 +606,52 @@ fn handle_notification(
     backend: &Arc<dyn MusicBackend>,
 ) {
     match info.player_state.as_str() {
-        "Playing" => state.player_state = backend::PlayerState::Playing,
-        "Paused" | "Stopped" => {
-            let is_same_track = !info.name.is_empty()
-                && state
-                    .track
-                    .as_ref()
-                    .map_or(false, |t| t.name == info.name && t.artist == info.artist);
+        "Playing" => {
+            state.player_state = backend::PlayerState::Playing;
+            // Cancel any pending auto-advance
+            AUTO_ADVANCE_TOKEN.fetch_add(1, Ordering::SeqCst);
+        }
+        "Paused" => {
+            state.player_state = backend::PlayerState::Paused;
 
-            // If same track and position is near the end, this is a natural
-            // track completion — snap position to duration so the progress
-            // bar shows the track as finished.
-            if is_same_track {
-                if let Some(ref mut t) = state.track {
-                    if t.duration > 0.0 && (t.duration - t.position) < 5.0 {
-                        t.position = t.duration;
-                    }
-                }
+            // If the track finished naturally (position near end), schedule
+            // auto-advance. This handles Spotify, which reports "Paused" (not
+            // "Stopped") when a track ends.
+            let near_end = state
+                .track
+                .as_ref()
+                .map_or(false, |t| t.duration > 0.0 && (t.duration - t.position) < 5.0);
+
+            if near_end
+                && !state.queue_tracks.is_empty()
+                && state.queue_selected + 1 < state.queue_tracks.len()
+            {
+                let token = AUTO_ADVANCE_TOKEN.load(Ordering::SeqCst);
+                let tx2 = tx.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(1500));
+                    let _ = tx2.send(AppEvent::AutoAdvance(token));
+                });
             }
-
-            if info.player_state == "Stopped" && !info.name.is_empty() {
-                // Don't immediately mark stopped during transitions
-            } else if info.player_state == "Stopped" {
+        }
+        "Stopped" => {
+            // Don't immediately clear — may be a transient transition.
+            // Only update player state if there's no track name coming
+            // (i.e. this is genuinely the end of playback, not a transition).
+            if info.name.is_empty() {
                 state.player_state = backend::PlayerState::Stopped;
-            } else {
-                state.player_state = backend::PlayerState::Paused;
+
+                // Schedule auto-advance if there are more tracks in the queue
+                if !state.queue_tracks.is_empty()
+                    && state.queue_selected + 1 < state.queue_tracks.len()
+                {
+                    let token = AUTO_ADVANCE_TOKEN.load(Ordering::SeqCst);
+                    let tx2 = tx.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_millis(1500));
+                        let _ = tx2.send(AppEvent::AutoAdvance(token));
+                    });
+                }
             }
         }
         _ => {}
