@@ -867,6 +867,22 @@ fn handle_queue_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppEv
                 fire_and_refresh(backend, tx, move |b| b.play_track_in_playlist(&playlist, idx));
             }
         }
+        KeyCode::Char('d') | KeyCode::Char('x') => {
+            if !state.queue_tracks.is_empty() && state.queue_selected < state.queue_tracks.len() {
+                state.queue_tracks.remove(state.queue_selected);
+                if state.queue_tracks.is_empty() {
+                    state.queue_selected = 0;
+                    state.queue_scroll = 0;
+                    state.queue_playlist_name.clear();
+                    playlist::clear_queue_state();
+                } else {
+                    if state.queue_selected >= state.queue_tracks.len() {
+                        state.queue_selected = state.queue_tracks.len() - 1;
+                    }
+                    playlist::save_queue_state(&state.queue_playlist_name, state.queue_selected, state.queue_tracks.len());
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -925,6 +941,24 @@ fn handle_library_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<App
                         fire_and_refresh(backend, tx, move |b| {
                             b.play_track_in_playlist(&name, idx)
                         });
+                    }
+                }
+            }
+            KeyCode::Char('d') | KeyCode::Char('x') => {
+                if !state.playlist_tracks.is_empty()
+                    && state.playlist_tracks_selected < state.playlist_tracks.len()
+                {
+                    if let LibrarySubView::Tracks(ref playlist_name) = state.library_sub_view {
+                        let idx = state.playlist_tracks_selected;
+                        let name = playlist_name.clone();
+                        let b = backend.clone();
+                        std::thread::spawn(move || b.remove_from_playlist(&name, idx));
+                        state.playlist_tracks.remove(idx);
+                        if state.playlist_tracks_selected >= state.playlist_tracks.len()
+                            && !state.playlist_tracks.is_empty()
+                        {
+                            state.playlist_tracks_selected = state.playlist_tracks.len() - 1;
+                        }
                     }
                 }
             }

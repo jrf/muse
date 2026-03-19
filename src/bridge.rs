@@ -86,6 +86,7 @@ extern "C" {
     fn music_reveal_artist(artist: *const c_char);
     fn music_reveal_album(album: *const c_char, artist: *const c_char);
     fn music_add_to_playlist(name: *const c_char);
+    fn music_remove_from_playlist(name: *const c_char, index: i32);
 
     // Notifications (callback with opaque pointer)
     fn music_register_notification_callback(cb: extern "C" fn(*mut c_void));
@@ -342,6 +343,11 @@ impl MusicBackend for AppleMusicBackend {
     fn add_to_playlist(&self, playlist_name: &str) {
         let c = CString::new(playlist_name).unwrap_or_default();
         unsafe { music_add_to_playlist(c.as_ptr()) }
+    }
+
+    fn remove_from_playlist(&self, playlist_name: &str, index: usize) {
+        let c = CString::new(playlist_name).unwrap_or_default();
+        unsafe { music_remove_from_playlist(c.as_ptr(), index as i32) }
     }
 
     fn setup_notifications(&self, tx: mpsc::Sender<NotificationInfo>) {

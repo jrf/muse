@@ -813,6 +813,36 @@ impl MusicBackend for SpotifyBackend {
         }
     }
 
+    fn remove_from_playlist(&self, playlist_name: &str, index: usize) {
+        let playlist_id = match self.find_playlist_id(playlist_name) {
+            Some(id) => id,
+            None => return,
+        };
+
+        // Get the track URI at the given index
+        let resp = match self.api_get(&format!(
+            "/playlists/{}/tracks?limit=1&offset={}&fields=items(track(uri))",
+            playlist_id, index
+        )) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+
+        if let Some(uri) = resp["items"]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|item| item["track"]["uri"].as_str())
+        {
+            let body = serde_json::json!({
+                "tracks": [{ "uri": uri, "positions": [index] }]
+            });
+            let _ = self.api_delete(
+                &format!("/playlists/{}/tracks", playlist_id),
+                Some(&body),
+            );
+        }
+    }
+
     fn setup_notifications(&self, tx: mpsc::Sender<NotificationInfo>) {
         // Spawn a polling thread that checks playback state every 2 seconds
         let client_id = self.client_id.clone();

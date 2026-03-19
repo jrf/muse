@@ -663,6 +663,20 @@ public func music_add_to_playlist(_ name: UnsafePointer<CChar>) {
     _ = runAppleScript(script)
 }
 
+@_cdecl("music_remove_from_playlist")
+public func music_remove_from_playlist(_ name: UnsafePointer<CChar>, _ index: Int32) {
+    let nameStr = String(cString: name)
+    let escaped = nameStr.replacingOccurrences(of: "\"", with: "\\\"")
+    // AppleScript uses 1-based indexing
+    let asIndex = index + 1
+    let script = """
+    tell application "Music"
+        delete track \(asIndex) of playlist "\(escaped)"
+    end tell
+    """
+    _ = runAppleScript(script)
+}
+
 private func iTunesSearchURL(term: String, entity: String) -> URL? {
     guard let encoded = term.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
           let searchURL = URL(string: "https://itunes.apple.com/search?term=\(encoded)&entity=\(entity)&limit=1") else { return nil }

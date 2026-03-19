@@ -149,6 +149,9 @@ pub trait MusicBackend: Send + Sync {
     /// Add the current track to a named playlist.
     fn add_to_playlist(&self, playlist_name: &str);
 
+    /// Remove a track from a playlist by index.
+    fn remove_from_playlist(&self, playlist_name: &str, index: usize);
+
     // -- Notifications --
 
     /// Set up notification delivery. The backend should send `NotificationInfo`
