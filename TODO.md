@@ -18,8 +18,6 @@
 - [ ] Spotify device picker — select which Spotify Connect device to control
 - [ ] Transfer playback between devices
 
----
-
 ## Done
 
 - [x] Spotify port — `MusicBackend` trait in `backend.rs`, Apple Music refactored behind it in `bridge.rs`
