@@ -68,6 +68,11 @@ spotify_client_id=YOUR_ID    # required if backend=spotify
 theme=synthwave              # color theme
 ```
 
+## Workflow
+
+- **TODO.md must be kept meticulously updated.** When completing a feature or fix, add it to the Done section. When discovering new work, add it to the appropriate section (Now/Next/Later).
+- **README.md must be kept meticulously updated.** When adding or changing features, keybindings, configuration options, or setup instructions, update the README to match.
+
 ## macOS Requirements
 
 - macOS 13+, Apple Music app must be running (for Apple Music backend)

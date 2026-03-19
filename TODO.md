@@ -26,3 +26,5 @@
 - [x] Runtime backend selection via `backend=spotify` in `~/.config/muse/config`
 - [x] Playback control, playlists, search, artwork, lyrics (LRCLIB), favorites, polling notifications
 - [x] Ctrl+F / Ctrl+B for page down/up navigation (vim-style)
+- [x] Remove track from queue (`d`/`x` in Queue tab)
+- [x] Remove track from playlist (`d`/`x` in Library tracks view)
