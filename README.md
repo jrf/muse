@@ -37,6 +37,12 @@ cd muse
 just
 ```
 
+### Spotify-Only (no Xcode needed)
+
+```
+cargo build --release --no-default-features --features spotify
+```
+
 ## Configuration
 
 Config file: `~/.config/muse/config`

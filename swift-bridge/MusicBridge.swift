@@ -142,16 +142,27 @@ public func music_cycle_repeat() {
 
 @_cdecl("music_toggle_favorite")
 public func music_toggle_favorite() {
-    let script = """
+    // Read current state first, then set explicitly
+    let readScript = """
     tell application "Music"
         if player state is not stopped then
             try
-                set loved of current track to not (loved of current track)
+                return loved of current track
             end try
+        end if
+        return false
+    end tell
+    """
+    let isLoved = runAppleScript(readScript) == "true"
+    let newValue = isLoved ? "false" : "true"
+    let writeScript = """
+    tell application "Music"
+        if player state is not stopped then
+            set loved of current track to \(newValue)
         end if
     end tell
     """
-    _ = runAppleScript(script)
+    _ = runAppleScript(writeScript)
 }
 
 // MARK: - Full State (opaque pointer pattern)

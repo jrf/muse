@@ -3,6 +3,11 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    // Only compile Swift bridge when apple-music feature is enabled
+    if env::var("CARGO_FEATURE_APPLE_MUSIC").is_err() {
+        return;
+    }
+
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let bridge_dir = PathBuf::from("swift-bridge");
 

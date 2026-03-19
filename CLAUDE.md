@@ -16,7 +16,16 @@ just release  # Release build only
 just clean    # Remove build artifacts
 ```
 
-The build process (defined in `build.rs`) automatically compiles `swift-bridge/MusicBridge.swift` into a static library (`libmusic_bridge.a`) before Rust compilation. Requires Swift 6.2+ and Xcode command line tools.
+### Feature Flags
+
+Both backends are enabled by default. Build with only one:
+
+```bash
+cargo build --no-default-features --features spotify      # Spotify only (no Swift/Xcode needed)
+cargo build --no-default-features --features apple-music   # Apple Music only (no ureq/serde)
+```
+
+The build process (defined in `build.rs`) compiles `swift-bridge/MusicBridge.swift` into a static library only when the `apple-music` feature is enabled. The `spotify` feature gates the `ureq`, `serde`, and `serde_json` dependencies.
 
 ## Architecture
 

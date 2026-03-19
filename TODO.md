@@ -7,14 +7,12 @@
 
 ## Next
 
-- [ ] Cross-platform support (Linux/Windows) — gate Swift bridge behind feature flag
 - [ ] Spotify queue API — use native queue endpoint instead of playlist-based queue
 - [ ] Handle Spotify Premium requirement gracefully (playback control needs Premium)
 - [ ] `muse auth` subcommand — trigger Spotify OAuth flow explicitly
 
 ## Later
 
-- [ ] Feature flags: `--features apple-music` / `--features spotify` to avoid unnecessary deps
 - [ ] Spotify device picker — select which Spotify Connect device to control
 - [ ] Transfer playback between devices
 
@@ -28,3 +26,6 @@
 - [x] Ctrl+F / Ctrl+B for page down/up navigation (vim-style)
 - [x] Remove track from queue (`d`/`x` in Queue tab)
 - [x] Remove track from playlist (`d`/`x` in Library tracks view)
+- [x] Feature flags: `--features apple-music` / `--features spotify` (both on by default, buildable independently)
+- [x] Removed auto-advance (was conflicting with Music.app's native playlist advancement)
+- [x] Fixed favorite toggle (split into separate read/write AppleScript calls)

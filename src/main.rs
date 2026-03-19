@@ -1,14 +1,15 @@
 mod backend;
+#[cfg(feature = "apple-music")]
 mod bridge;
 mod lastfm;
 mod playlist;
+#[cfg(feature = "spotify")]
 mod spotify;
 mod state;
 mod theme;
 mod ui;
 
 use std::io;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
@@ -87,16 +88,14 @@ enum AppEvent {
     SearchResults(String, Vec<backend::SearchResult>),
     LyricsLoaded(String, Option<backend::LyricsResult>),
     ArtworkLoaded(String, ratatui_image::protocol::StatefulProtocol),
-    AutoAdvance(u64),
     LastfmScrobbled,
 }
 
-/// Monotonic token used to cancel stale auto-advance requests.
-static AUTO_ADVANCE_TOKEN: AtomicU64 = AtomicU64::new(0);
 
 fn create_backend() -> Arc<dyn MusicBackend> {
     let config = load_backend_config();
     match config.as_deref() {
+        #[cfg(feature = "spotify")]
         Some("spotify") => {
             let client_id = load_spotify_client_id().unwrap_or_else(|| {
                 eprintln!(
@@ -107,7 +106,18 @@ fn create_backend() -> Arc<dyn MusicBackend> {
             });
             Arc::new(spotify::SpotifyBackend::new(&client_id))
         }
+        #[cfg(not(feature = "spotify"))]
+        Some("spotify") => {
+            eprintln!("Spotify support not compiled in. Build with: cargo build --features spotify");
+            std::process::exit(1);
+        }
+        #[cfg(feature = "apple-music")]
         _ => Arc::new(bridge::AppleMusicBackend::new()),
+        #[cfg(not(feature = "apple-music"))]
+        _ => {
+            eprintln!("No backend available. Set backend=spotify in ~/.config/muse/config");
+            std::process::exit(1);
+        }
     }
 }
 
@@ -411,24 +421,6 @@ fn run_app(
                 AppEvent::LastfmScrobbled => {
                     state.lastfm_status = "last.fm ✓".to_string();
                 }
-                AppEvent::AutoAdvance(token) => {
-                    // Only advance if the token is still current (not cancelled by a "Playing" event)
-                    if token == AUTO_ADVANCE_TOKEN.load(Ordering::SeqCst)
-                        && !state.queue_tracks.is_empty()
-                        && state.queue_selected + 1 < state.queue_tracks.len()
-                    {
-                        let next_idx = state.queue_selected + 1;
-                        state.queue_selected = next_idx;
-                        if next_idx >= state.queue_scroll + PAGE_SIZE {
-                            state.queue_scroll = next_idx.saturating_sub(3);
-                        }
-                        playlist::save_queue_state(&state.queue_playlist_name, next_idx, state.queue_tracks.len());
-                        let playlist = state.queue_playlist_name.clone();
-                        fire_and_refresh(&backend, &tx, move |b| {
-                            b.play_track_in_playlist(&playlist, next_idx)
-                        });
-                    }
-                }
             },
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
@@ -577,11 +569,7 @@ fn handle_notification(
     backend: &Arc<dyn MusicBackend>,
 ) {
     match info.player_state.as_str() {
-        "Playing" => {
-            state.player_state = backend::PlayerState::Playing;
-            // Cancel any pending auto-advance
-            AUTO_ADVANCE_TOKEN.fetch_add(1, Ordering::SeqCst);
-        }
+        "Playing" => state.player_state = backend::PlayerState::Playing,
         "Paused" => state.player_state = backend::PlayerState::Paused,
         "Stopped" => {
             // Don't immediately clear — may be a transient transition.
@@ -589,19 +577,6 @@ fn handle_notification(
             // (i.e. this is genuinely the end of playback, not a transition).
             if info.name.is_empty() {
                 state.player_state = backend::PlayerState::Stopped;
-                // Schedule auto-advance if there are more tracks in the queue
-                if !state.queue_tracks.is_empty()
-                    && state.queue_selected + 1 < state.queue_tracks.len()
-                {
-                    let token = AUTO_ADVANCE_TOKEN.load(Ordering::SeqCst);
-                    let tx2 = tx.clone();
-                    std::thread::spawn(move || {
-                        // Debounce: wait before advancing to avoid cascading from
-                        // transient "Stopped" states during track transitions.
-                        std::thread::sleep(Duration::from_millis(1500));
-                        let _ = tx2.send(AppEvent::AutoAdvance(token));
-                    });
-                }
             }
         }
         _ => {}
@@ -1186,6 +1161,7 @@ fn load_backend_config() -> Option<String> {
     None
 }
 
+#[cfg(feature = "spotify")]
 fn load_spotify_client_id() -> Option<String> {
     let contents = std::fs::read_to_string(config_file()).ok()?;
     for line in contents.lines() {
