@@ -27,12 +27,22 @@ use theme::Theme;
 
 const PAGE_SIZE: usize = 20;
 
-/// Map vim-style Ctrl key combos to equivalent navigation keys.
-fn normalize_nav_key(key: &KeyEvent) -> KeyCode {
+/// Map vim-style key combos to equivalent navigation keys.
+/// When `vim_letters` is true, also map j/k/g/G to arrow keys.
+/// Pass false when the user is typing into a text field.
+fn normalize_nav_key(key: &KeyEvent, vim_letters: bool) -> KeyCode {
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         match key.code {
             KeyCode::Char('f') => KeyCode::PageDown,
             KeyCode::Char('b') => KeyCode::PageUp,
+            _ => key.code,
+        }
+    } else if vim_letters {
+        match key.code {
+            KeyCode::Char('j') => KeyCode::Down,
+            KeyCode::Char('k') => KeyCode::Up,
+            KeyCode::Char('g') => KeyCode::Home,
+            KeyCode::Char('G') => KeyCode::End,
             _ => key.code,
         }
     } else {
@@ -409,7 +419,9 @@ fn run_app(
                     {
                         let next_idx = state.queue_selected + 1;
                         state.queue_selected = next_idx;
-                        state.queue_scroll = next_idx.saturating_sub(3);
+                        if next_idx >= state.queue_scroll + PAGE_SIZE {
+                            state.queue_scroll = next_idx.saturating_sub(3);
+                        }
                         playlist::save_queue_state(&state.queue_playlist_name, next_idx, state.queue_tracks.len());
                         let playlist = state.queue_playlist_name.clone();
                         fire_and_refresh(&backend, &tx, move |b| {
@@ -623,7 +635,9 @@ fn handle_notification(
                 &info.artist,
             ) {
                 state.queue_selected = pos;
-                state.queue_scroll = pos.saturating_sub(3);
+                if pos < state.queue_scroll || pos >= state.queue_scroll + PAGE_SIZE {
+                    state.queue_scroll = pos.saturating_sub(3);
+                }
             }
         }
 
@@ -839,7 +853,7 @@ fn handle_key(
 }
 
 fn handle_queue_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppEvent>, backend: &Arc<dyn MusicBackend>) {
-    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key), state.queue_selected, state.queue_scroll, state.queue_tracks.len()) {
+    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, true), state.queue_selected, state.queue_scroll, state.queue_tracks.len()) {
         state.queue_selected = sel;
         state.queue_scroll = scr;
         return;
@@ -860,7 +874,7 @@ fn handle_queue_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppEv
 fn handle_library_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppEvent>, backend: &Arc<dyn MusicBackend>) {
     match &state.library_sub_view {
         LibrarySubView::Playlists => {
-            if let Some((sel, scr)) = list_nav(normalize_nav_key(&key), state.library_selected, state.library_scroll, state.playlists.len()) {
+            if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, true), state.library_selected, state.library_scroll, state.playlists.len()) {
                 state.library_selected = sel;
                 state.library_scroll = scr;
                 return;
@@ -885,7 +899,7 @@ fn handle_library_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<App
             }
         }
         LibrarySubView::Tracks(_) => {
-            if let Some((sel, scr)) = list_nav(normalize_nav_key(&key), state.playlist_tracks_selected, state.playlist_tracks_scroll, state.playlist_tracks.len()) {
+            if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, true), state.playlist_tracks_selected, state.playlist_tracks_scroll, state.playlist_tracks.len()) {
                 state.playlist_tracks_selected = sel;
                 state.playlist_tracks_scroll = scr;
                 return;
@@ -903,7 +917,9 @@ fn handle_library_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<App
                         state.queue_tracks = state.playlist_tracks.clone();
                         state.queue_playlist_name = playlist_name.clone();
                         state.queue_selected = idx;
-                        state.queue_scroll = idx.saturating_sub(3);
+                        if idx < state.queue_scroll || idx >= state.queue_scroll + PAGE_SIZE {
+                            state.queue_scroll = idx.saturating_sub(3);
+                        }
                         playlist::save_queue_state(playlist_name, idx, state.playlist_tracks.len());
                         let name = playlist_name.clone();
                         fire_and_refresh(backend, tx, move |b| {
@@ -919,7 +935,7 @@ fn handle_library_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<App
 }
 
 fn handle_search_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppEvent>, backend: &Arc<dyn MusicBackend>) {
-    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key), state.search_selected, state.search_scroll, state.search_results.len()) {
+    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, false), state.search_selected, state.search_scroll, state.search_results.len()) {
         state.search_selected = sel;
         state.search_scroll = scr;
         return;
@@ -956,7 +972,7 @@ fn handle_search_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppE
 }
 
 fn handle_lyrics_key(key: KeyEvent, state: &mut AppState) {
-    match normalize_nav_key(&key) {
+    match normalize_nav_key(&key, true) {
         KeyCode::Up => {
             if state.lyrics_scroll > 0 {
                 state.lyrics_scroll -= 1;
@@ -992,7 +1008,7 @@ fn handle_lyrics_key(key: KeyEvent, state: &mut AppState) {
 }
 
 fn handle_themes_key(key: KeyEvent, state: &mut AppState, theme: &mut Theme) {
-    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key), state.theme_selected, state.theme_scroll, theme::ALL_THEMES.len()) {
+    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, true), state.theme_selected, state.theme_scroll, theme::ALL_THEMES.len()) {
         state.theme_selected = sel;
         state.theme_scroll = scr;
         preview_theme(state, theme);
@@ -1012,7 +1028,7 @@ fn handle_themes_key(key: KeyEvent, state: &mut AppState, theme: &mut Theme) {
 }
 
 fn handle_playlist_picker_key(key: KeyEvent, state: &mut AppState, _tx: &mpsc::Sender<AppEvent>, backend: &Arc<dyn MusicBackend>) {
-    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key), state.playlist_picker_selected, state.playlist_picker_scroll, state.playlists.len()) {
+    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, true), state.playlist_picker_selected, state.playlist_picker_scroll, state.playlists.len()) {
         state.playlist_picker_selected = sel;
         state.playlist_picker_scroll = scr;
         return;
