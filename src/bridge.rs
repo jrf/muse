@@ -358,4 +358,8 @@ impl MusicBackend for AppleMusicBackend {
     fn tick(&self) {
         unsafe { music_pump_runloop() }
     }
+
+    fn needs_queue_advance(&self) -> bool {
+        true
+    }
 }

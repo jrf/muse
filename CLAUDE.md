@@ -31,7 +31,7 @@ The build process (defined in `build.rs`) compiles `swift-bridge/MusicBridge.swi
 
 ### Backend Trait (`src/backend.rs`)
 
-Defines `MusicBackend` trait and shared types (`Track`, `PlayerState`, `RepeatMode`, `FullState`, `PlaylistTrack`, `SearchResult`, `LyricsLine`, `NotificationInfo`). All backends implement this trait. The main loop uses `Arc<dyn MusicBackend>` for runtime backend selection.
+Defines `MusicBackend` trait and shared types (`Track`, `PlayerState`, `RepeatMode`, `FullState`, `PlaylistTrack`, `SearchResult`, `LyricsLine`, `NotificationInfo`). All backends implement this trait. The main loop uses `Arc<dyn MusicBackend>` for runtime backend selection. Backend-specific behavior is expressed through trait methods (e.g. `needs_queue_advance()`), not name checks in the frontend.
 
 ### Apple Music Backend (`src/bridge.rs`)
 

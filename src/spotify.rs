@@ -905,6 +905,10 @@ impl MusicBackend for SpotifyBackend {
     fn tick(&self) {
         // No-op for Spotify — notifications are handled by the polling thread
     }
+
+    fn needs_queue_advance(&self) -> bool {
+        false
+    }
 }
 
 // MARK: - Private helpers

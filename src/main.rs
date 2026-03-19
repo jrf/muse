@@ -625,26 +625,29 @@ fn handle_notification(
                 state.player_state = backend::PlayerState::Paused;
             }
 
-            // Auto-advance our queue for Apple Music. Spotify manages its
-            // own queue natively. Guard: was_playing prevents re-entry
-            // (state is already updated above so a second notification
-            // won't fire this again).
-            if was_playing
-                && is_same_track
-                && near_end
-                && backend.name() != "Spotify"
-                && !state.queue_tracks.is_empty()
-                && state.queue_selected + 1 < state.queue_tracks.len()
-            {
-                let next_idx = state.queue_selected + 1;
-                state.queue_selected = next_idx;
-                if next_idx >= state.queue_scroll + PAGE_SIZE {
-                    state.queue_scroll = next_idx.saturating_sub(3);
+            // Auto-advance when a track finishes naturally.
+            // Guard: was_playing prevents re-entry (state is already
+            // updated above so a second notification won't fire again).
+            if was_playing && is_same_track && near_end {
+                if backend.needs_queue_advance()
+                    && !state.queue_tracks.is_empty()
+                    && state.queue_selected + 1 < state.queue_tracks.len()
+                {
+                    // Advance our internal queue
+                    let next_idx = state.queue_selected + 1;
+                    state.queue_selected = next_idx;
+                    if next_idx >= state.queue_scroll + PAGE_SIZE {
+                        state.queue_scroll = next_idx.saturating_sub(3);
+                    }
+                    let playlist = state.queue_playlist_name.clone();
+                    fire_and_refresh(backend, tx, move |b| {
+                        b.play_track_in_playlist(&playlist, next_idx)
+                    });
+                } else {
+                    // No internal queue — tell the backend to advance
+                    // (e.g. Music.app sometimes stalls at end-of-track)
+                    fire_and_refresh(backend, tx, |b| b.next_track());
                 }
-                let playlist = state.queue_playlist_name.clone();
-                fire_and_refresh(backend, tx, move |b| {
-                    b.play_track_in_playlist(&playlist, next_idx)
-                });
             }
         }
         _ => {}

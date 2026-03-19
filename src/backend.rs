@@ -166,4 +166,8 @@ pub trait MusicBackend: Send + Sync {
     /// Apple Music uses this to pump the RunLoop for notification delivery.
     /// Other backends can use this for periodic main-thread work or no-op.
     fn tick(&self);
+
+    /// Whether the frontend should auto-advance our queue when a track ends.
+    /// Returns false for backends like Spotify that manage their own queue.
+    fn needs_queue_advance(&self) -> bool;
 }
