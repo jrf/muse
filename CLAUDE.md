@@ -81,6 +81,7 @@ theme=synthwave              # color theme
 
 - **TODO.md must be kept meticulously updated.** When completing a feature or fix, add it to the Done section. When discovering new work, add it to the appropriate section (Now/Next/Later).
 - **README.md must be kept meticulously updated.** When adding or changing features, keybindings, configuration options, or setup instructions, update the README to match.
+- **CLAUDE.md must be kept meticulously updated.** When changing architecture, adding modules, altering key patterns, or modifying build/config behavior, update the relevant sections.
 
 ## macOS Requirements
 

@@ -31,3 +31,4 @@
 - [x] Fixed favorite toggle (split into separate read/write AppleScript calls)
 - [x] OS-aware build: Apple Music auto-skipped on non-macOS, no manual flags needed
 - [x] Queue restored on relaunch from persisted playlist state
+- [x] Reverted auto-advance feature — both backends handle queue advancement natively, `sync_queue_selection` keeps the UI in sync
