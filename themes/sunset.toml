@@ -5,5 +5,5 @@ text = 223
 text_bright = 230
 text_dim = 180
 text_muted = 137
-time_text = 230
+time_text = 255
 error = 196
