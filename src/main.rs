@@ -88,7 +88,7 @@ enum AppEvent {
     SearchResults(String, Vec<backend::SearchResult>),
     LyricsLoaded(String, Option<backend::LyricsResult>),
     ArtworkLoaded(String, ratatui_image::protocol::StatefulProtocol),
-    LastfmScrobbled,
+    LastfmScrobbleResult(Result<(), String>),
 }
 
 fn create_backend() -> Arc<dyn MusicBackend> {
@@ -247,7 +247,9 @@ fn run_app(
     load_config(&mut state, &mut current_theme);
 
     // Last.fm (via muse-scrobble CLI)
-    let lastfm_available = lastfm::is_available();
+    let mut lastfm_available = lastfm::is_available();
+    let mut lastfm_last_check = Instant::now();
+    let lastfm_recheck_interval = Duration::from_secs(60);
     let mut scrobble_tracker = lastfm::ScrobbleTracker::new();
     if lastfm_available {
         state.lastfm_status = "last.fm".to_string();
@@ -321,6 +323,15 @@ fn run_app(
                         });
                     }
 
+                    // Last.fm: periodically re-check availability if not connected
+                    if !lastfm_available && lastfm_last_check.elapsed() >= lastfm_recheck_interval {
+                        lastfm_last_check = Instant::now();
+                        lastfm_available = lastfm::is_available();
+                        if lastfm_available {
+                            state.lastfm_status = "last.fm".to_string();
+                        }
+                    }
+
                     // Last.fm scrobble check
                     if lastfm_available && scrobble_tracker.should_scrobble() {
                         scrobble_tracker.mark_scrobbled();
@@ -331,8 +342,8 @@ fn run_app(
                         let dur = scrobble_tracker.duration as u64;
                         let tx2 = tx.clone();
                         std::thread::spawn(move || {
-                            let _ = lastfm::scrobble(&artist, &track, &album, dur, ts);
-                            let _ = tx2.send(AppEvent::LastfmScrobbled);
+                            let result = lastfm::scrobble(&artist, &track, &album, dur, ts);
+                            let _ = tx2.send(AppEvent::LastfmScrobbleResult(result));
                         });
                     }
                 }
@@ -366,8 +377,11 @@ fn run_app(
                             let track = info.name.clone();
                             let album = info.album.clone();
                             let dur = (info.total_time_ms / 1000.0) as u64;
+                            let tx2 = tx.clone();
                             std::thread::spawn(move || {
-                                lastfm::now_playing(&artist, &track, &album, dur);
+                                if let Err(_) = lastfm::now_playing(&artist, &track, &album, dur) {
+                                    let _ = tx2.send(AppEvent::LastfmScrobbleResult(Err(String::new())));
+                                }
                             });
                         }
                     }
@@ -438,8 +452,18 @@ fn run_app(
                         state.artwork = Some(proto);
                     }
                 }
-                AppEvent::LastfmScrobbled => {
-                    state.lastfm_status = "last.fm ✓".to_string();
+                AppEvent::LastfmScrobbleResult(result) => {
+                    match result {
+                        Ok(()) => {
+                            state.lastfm_status = "last.fm ✓".to_string();
+                        }
+                        Err(_) => {
+                            // Auth may have expired — recheck on next tick cycle
+                            lastfm_available = false;
+                            lastfm_last_check = Instant::now() - lastfm_recheck_interval;
+                            state.lastfm_status = String::new();
+                        }
+                    }
                 }
             },
             Err(mpsc::RecvTimeoutError::Timeout) => {}

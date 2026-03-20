@@ -515,10 +515,26 @@ public func music_search_free(_ ptr: UnsafeMutableRawPointer) {
 @_cdecl("music_play_track")
 public func music_play_track(_ name: UnsafePointer<CChar>, _ artist: UnsafePointer<CChar>) {
     let nameStr = String(cString: name)
+    let artistStr = String(cString: artist)
     let escapedName = nameStr.replacingOccurrences(of: "\"", with: "\\\"")
+    let escapedArtist = artistStr.replacingOccurrences(of: "\"", with: "\\\"")
     let script = """
     tell application "Music"
         set results to (search playlist "Library" for "\(escapedName)")
+        repeat with t in results
+            if name of t is "\(escapedName)" and artist of t is "\(escapedArtist)" then
+                play t
+                return
+            end if
+        end repeat
+        -- Fallback: exact name match (any artist)
+        repeat with t in results
+            if name of t is "\(escapedName)" then
+                play t
+                return
+            end if
+        end repeat
+        -- Last resort: play first search hit
         if (count of results) > 0 then
             play item 1 of results
         end if

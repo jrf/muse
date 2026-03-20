@@ -17,11 +17,18 @@ pub fn is_available() -> bool {
         .unwrap_or(false)
 }
 
-/// Send "now playing" update (fire and forget from a background thread).
-pub fn now_playing(artist: &str, track: &str, album: &str, duration: u64) {
-    let _ = Command::new(BIN)
+/// Send "now playing" update.
+pub fn now_playing(artist: &str, track: &str, album: &str, duration: u64) -> Result<(), String> {
+    let output = Command::new(BIN)
         .args(["now-playing", "--artist", artist, "--track", track, "--album", album, "--duration", &duration.to_string()])
-        .output();
+        .output()
+        .map_err(|e| format!("Failed to run muse-scrobble: {}", e))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(stderr.trim().to_string())
+    }
 }
 
 /// Submit a scrobble (fire and forget from a background thread).
