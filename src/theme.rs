@@ -17,11 +17,14 @@ const DEFAULT_THEME_NAME: &str = "synthwave";
 
 /// Embedded default theme files (compiled into the binary).
 const EMBEDDED_THEMES: &[(&str, &str)] = &[
-    ("synthwave", include_str!("../themes/synthwave.toml")),
+    ("classic", include_str!("../themes/classic.toml")),
+    ("fire", include_str!("../themes/fire.toml")),
+    ("matrix", include_str!("../themes/matrix.toml")),
     ("monochrome", include_str!("../themes/monochrome.toml")),
     ("ocean", include_str!("../themes/ocean.toml")),
+    ("purple", include_str!("../themes/purple.toml")),
     ("sunset", include_str!("../themes/sunset.toml")),
-    ("matrix", include_str!("../themes/matrix.toml")),
+    ("synthwave", include_str!("../themes/synthwave.toml")),
     ("tokyo night moon", include_str!("../themes/tokyo-night-moon.toml")),
 ];
 
