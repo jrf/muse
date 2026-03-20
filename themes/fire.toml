@@ -1,0 +1,9 @@
+[colors]
+border = "#ff6600"
+accent = "#ff0000"
+text = "#ffcc00"
+text_bright = "#ffffcc"
+text_dim = "#cc6600"
+text_muted = "#8b4500"
+time_text = "#ffffcc"
+error = "#ff0000"
