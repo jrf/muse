@@ -770,11 +770,10 @@ fn handle_key(
                 // Reset selection to the currently active theme
                 if let Some((idx, _)) = theme::find_theme(&state.theme_name, &state.themes) {
                     state.theme_selected = idx;
-                    state.theme_scroll = idx.saturating_sub(3);
                 } else {
                     state.theme_selected = 0;
-                    state.theme_scroll = 0;
                 }
+                state.theme_scroll = 0;
             } else {
                 restore_saved_theme(state, theme);
             }
@@ -1120,7 +1119,7 @@ fn handle_theme_picker_key(key: KeyEvent, state: &mut AppState, theme: &mut Them
                 state.show_theme_picker = false;
             }
         }
-        KeyCode::Esc | KeyCode::Char('t') => {
+        KeyCode::Esc | KeyCode::Char('t') | KeyCode::Char('q') => {
             restore_saved_theme(state, theme);
             state.show_theme_picker = false;
         }
