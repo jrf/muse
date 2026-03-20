@@ -52,7 +52,7 @@ Single file exporting ~40 `@_cdecl` functions. Controls Music.app via AppleScrip
 - **`state.rs`** — `AppState` struct with all UI state: selected indices, scroll positions, loaded data, active tab.
 - **`playlist.rs`** — Apple Music-specific queue state persistence and CLI playlist-aware next/prev. Not used by Spotify backend.
 - **`lastfm.rs`** — Last.fm scrobbling via external `muse-scrobble` CLI. `ScrobbleTracker` tracks play timing in-process (50% or 4min threshold).
-- **`theme.rs`** — Six color themes using 256-color indexed palette.
+- **`theme.rs`** — Theme loading from TOML config files (`~/.config/muse/themes/*.toml`). Default themes are embedded via `include_str!` from `themes/` and written to disk on first run. Supports 256-color indexed palette and hex RGB colors.
 
 ### Legacy Swift Frontend (`Sources/`)
 
@@ -69,13 +69,22 @@ The original pure-Swift TUI (direct ANSI rendering). Not used when building with
 
 ## Configuration
 
-File: `~/.config/muse/config` (plain text `KEY=VALUE`):
+File: `~/.config/muse/config.toml` (TOML):
 
+```toml
+backend = "spotify"              # optional, default is "apple_music"
+theme = "synthwave"              # color theme (filename from ~/.config/muse/themes/)
+default_tab = "queue"            # tab shown on launch: queue, library, search, lyrics
+ui_width = 120                   # max UI width in columns (min 40, or "auto")
+show_artwork = true              # display album art
+
+[spotify]
+client_id = "YOUR_ID"            # required if backend = "spotify"
 ```
-backend=spotify              # optional, default is apple_music
-spotify_client_id=YOUR_ID    # required if backend=spotify
-theme=synthwave              # color theme
-```
+
+Legacy plain-text `KEY=VALUE` configs (old `config` file) are auto-migrated to TOML on first read.
+
+Themes directory: `~/.config/muse/themes/` — TOML files with `[colors]` table (border, accent, text, text_bright, text_dim, text_muted, time_text, error). Values are 256-color indices (integers) or hex RGB strings (`"#82aaff"`). Default themes embedded in `themes/` dir are written on first run.
 
 ## Workflow
 

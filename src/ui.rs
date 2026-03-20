@@ -16,8 +16,11 @@ use crate::theme::Theme;
 pub fn draw(f: &mut Frame, state: &AppState, theme: &Theme, artwork: &mut Option<StatefulProtocol>) {
     let area = f.area();
 
-    // Center the UI in a 120-col box
-    let box_w = area.width.min(120);
+    let box_w = if state.ui_width == 0 {
+        area.width
+    } else {
+        area.width.min(state.ui_width)
+    };
     let h_pad = (area.width.saturating_sub(box_w)) / 2;
 
     let inner = Rect {
@@ -103,7 +106,7 @@ fn draw_player_section(
 
     // Always reserve space for artwork to prevent layout shifts during track changes.
     // The artwork column stays even while new artwork is loading.
-    let wide_enough = area.width >= 30;
+    let wide_enough = state.show_artwork && area.width >= 30;
     let art_cols: u16 = 14;
 
     let (art_area, text_area) = if wide_enough {
@@ -257,12 +260,15 @@ fn draw_tab_content(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) 
         draw_playlist_picker(f, area, state, theme);
         return;
     }
+    if state.show_theme_picker {
+        draw_theme_picker(f, area, state, theme);
+        return;
+    }
     match state.active_tab {
         Tab::Queue => draw_queue(f, area, state, theme),
         Tab::Library => draw_library(f, area, state, theme),
         Tab::Search => draw_search(f, area, state, theme),
         Tab::Lyrics => draw_lyrics(f, area, state, theme),
-        Tab::Themes => draw_themes(f, area, state, theme),
     }
 }
 
@@ -513,8 +519,22 @@ fn draw_lyrics(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     f.render_widget(paragraph, area);
 }
 
-fn draw_themes(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
-    let items: Vec<ListItem> = crate::theme::ALL_THEMES
+fn draw_theme_picker(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
+    let rows = Layout::vertical([Constraint::Length(2), Constraint::Min(1)]).split(area);
+
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            "Themes",
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .alignment(Alignment::Center),
+        rows[0],
+    );
+
+    let items: Vec<ListItem> = state
+        .themes
         .iter()
         .enumerate()
         .map(|(i, (name, _))| {
@@ -536,7 +556,7 @@ fn draw_themes(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
         .collect();
 
     let mut list_state = ListState::default().with_offset(state.theme_scroll);
-    f.render_stateful_widget(List::new(items), area, &mut list_state);
+    f.render_stateful_widget(List::new(items), rows[1], &mut list_state);
 }
 
 fn draw_help_overlay(f: &mut Frame, area: Rect, theme: &Theme) {
@@ -559,6 +579,7 @@ fn draw_help_overlay(f: &mut Frame, area: Rect, theme: &Theme) {
         ("o", "Open artist in Music"),
         ("O", "Open album in Music"),
         ("L", "Lyrics tab"),
+        ("t", "Theme picker"),
         ("↑ / ↓", "Navigate list"),
         ("Enter", "Play / Browse"),
         ("Backspace", "Back / Clear"),

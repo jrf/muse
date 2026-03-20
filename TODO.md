@@ -33,3 +33,7 @@
 - [x] Queue restored on relaunch from persisted playlist state
 - [x] Reverted auto-advance feature — both backends handle queue advancement natively, `sync_queue_selection` keeps the UI in sync
 - [x] Fix end-of-track stall — call `next_track()` when track finishes but backend doesn't advance on its own
+- [x] External theme files — themes loaded from `~/.config/muse/themes/*.toml` instead of hardcoded in Rust
+- [x] TOML config file (`config.toml`) replacing legacy plain-text KEY=VALUE format
+- [x] Theme picker moved from tab bar to overlay (activated by `t`)
+- [x] Configurable `default_tab`, `ui_width`, and `show_artwork` in config.toml

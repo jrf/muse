@@ -3,6 +3,7 @@
 use ratatui_image::protocol::StatefulProtocol;
 
 use crate::backend;
+use crate::theme::Theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -10,11 +11,10 @@ pub enum Tab {
     Library,
     Search,
     Lyrics,
-    Themes,
 }
 
 impl Tab {
-    pub const ALL: &[Tab] = &[Tab::Queue, Tab::Library, Tab::Search, Tab::Lyrics, Tab::Themes];
+    pub const ALL: &[Tab] = &[Tab::Queue, Tab::Library, Tab::Search, Tab::Lyrics];
 
     pub fn label(&self) -> &'static str {
         match self {
@@ -22,7 +22,6 @@ impl Tab {
             Tab::Library => "Library",
             Tab::Search => "Search",
             Tab::Lyrics => "Lyrics",
-            Tab::Themes => "Themes",
         }
     }
 
@@ -31,18 +30,26 @@ impl Tab {
             Tab::Queue => Tab::Library,
             Tab::Library => Tab::Search,
             Tab::Search => Tab::Lyrics,
-            Tab::Lyrics => Tab::Themes,
-            Tab::Themes => Tab::Queue,
+            Tab::Lyrics => Tab::Queue,
         }
     }
 
     pub fn prev(&self) -> Tab {
         match self {
-            Tab::Queue => Tab::Themes,
+            Tab::Queue => Tab::Lyrics,
             Tab::Library => Tab::Queue,
             Tab::Search => Tab::Library,
             Tab::Lyrics => Tab::Search,
-            Tab::Themes => Tab::Lyrics,
+        }
+    }
+
+    pub fn from_name(s: &str) -> Option<Tab> {
+        match s {
+            "queue" => Some(Tab::Queue),
+            "library" => Some(Tab::Library),
+            "search" => Some(Tab::Search),
+            "lyrics" => Some(Tab::Lyrics),
+            _ => None,
         }
     }
 }
@@ -54,6 +61,10 @@ pub enum LibrarySubView {
 }
 
 pub struct AppState {
+    // Config
+    pub ui_width: u16,
+    pub show_artwork: bool,
+
     // Player
     pub track: Option<backend::Track>,
     pub artwork: Option<StatefulProtocol>,
@@ -96,9 +107,11 @@ pub struct AppState {
     pub lyrics_track_key: String,
 
     // Themes
+    pub themes: Vec<(String, Theme)>,
     pub theme_name: String,
     pub theme_selected: usize,
     pub theme_scroll: usize,
+    pub show_theme_picker: bool,
 
     // Help overlay
     pub show_help: bool,
@@ -118,6 +131,8 @@ pub struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
+            ui_width: 120,
+            show_artwork: true,
             track: None,
             artwork: None,
             artwork_key: String::new(),
@@ -147,9 +162,11 @@ impl Default for AppState {
             lyrics_scroll: 0,
             lyrics_manual_scroll: false,
             lyrics_track_key: String::new(),
+            themes: Vec::new(),
             theme_name: "synthwave".to_string(),
             theme_selected: 0,
             theme_scroll: 0,
+            show_theme_picker: false,
             show_help: false,
             current_track_favorited: false,
             show_playlist_picker: false,
