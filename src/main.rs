@@ -98,7 +98,7 @@ fn create_backend() -> Arc<dyn MusicBackend> {
         Some("spotify") => {
             let client_id = load_spotify_client_id().unwrap_or_else(|| {
                 eprintln!(
-                    "Spotify backend requires spotify_client_id in ~/.config/muse/config\n\
+                    "Spotify backend requires client_id under [spotify] in ~/.config/muse/config.toml\n\
                      Get one at https://developer.spotify.com/dashboard"
                 );
                 std::process::exit(1);
