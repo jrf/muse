@@ -1,0 +1,9 @@
+[colors]
+border = 208
+accent = 203
+text = 223
+text_bright = 230
+text_dim = 180
+text_muted = 137
+time_text = 230
+error = 196

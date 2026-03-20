@@ -149,11 +149,17 @@ fn main() -> io::Result<()> {
     let initial_state = backend.fetch_state();
     let initial_playlists = backend.get_playlists();
 
+    // Check config for artwork preference before querying terminal
+    let show_artwork = read_config()
+        .and_then(|doc| doc.get("show_artwork").and_then(|v| v.as_bool()))
+        .unwrap_or(true);
+
     // Detect image protocol before entering raw mode (queries terminal)
-    // Falls back to halfblocks (unicode) if terminal doesn't support Sixel/Kitty/iTerm2
-    let picker = Some(
-        Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks()),
-    );
+    let picker = if show_artwork {
+        Some(Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks()))
+    } else {
+        None
+    };
 
     // Fetch initial artwork before raw mode
     let initial_artwork = if let (Some(_), Some(ref picker)) = (&initial_state.track, &picker) {
@@ -207,6 +213,7 @@ fn run_app(
     let (tx, rx) = mpsc::channel::<AppEvent>();
 
     let mut state = AppState::default();
+    state.themes = theme::load_themes();
     let mut current_theme = theme::default_theme();
     let mut last_refresh = Instant::now();
     let refresh_interval = Duration::from_secs(2);
@@ -517,6 +524,8 @@ fn apply_fresh_state(
 
 fn interpolated_state(state: &AppState, last_update: &Instant) -> AppState {
     let mut display = AppState {
+        ui_width: state.ui_width,
+        show_artwork: state.show_artwork,
         track: state.track.clone(),
         artwork: None, // artwork is rendered separately via mutable ref
         artwork_key: state.artwork_key.clone(),
@@ -546,9 +555,11 @@ fn interpolated_state(state: &AppState, last_update: &Instant) -> AppState {
         lyrics_scroll: state.lyrics_scroll,
         lyrics_manual_scroll: state.lyrics_manual_scroll,
         lyrics_track_key: state.lyrics_track_key.clone(),
+        themes: state.themes.clone(),
         theme_name: state.theme_name.clone(),
         theme_selected: state.theme_selected,
         theme_scroll: state.theme_scroll,
+        show_theme_picker: state.show_theme_picker,
         show_help: state.show_help,
         current_track_favorited: state.current_track_favorited,
         show_playlist_picker: state.show_playlist_picker,
@@ -727,6 +738,12 @@ fn handle_key(
         return false;
     }
 
+    // Theme picker overlay
+    if state.show_theme_picker {
+        handle_theme_picker_key(key, state, theme);
+        return false;
+    }
+
     // Playlist picker
     if state.show_playlist_picker {
         handle_playlist_picker_key(key, state, tx, backend);
@@ -740,37 +757,38 @@ fn handle_key(
         KeyCode::Char('q') if !in_search => return true,
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return true,
         KeyCode::Tab => {
-            if state.active_tab == Tab::Themes {
-                restore_saved_theme(state, theme);
-            }
             state.active_tab = state.active_tab.next();
             return false;
         }
         KeyCode::BackTab => {
-            if state.active_tab == Tab::Themes {
-                restore_saved_theme(state, theme);
-            }
             state.active_tab = state.active_tab.prev();
             return false;
         }
-        KeyCode::Char('l') if !in_search => {
-            if state.active_tab == Tab::Themes {
+        KeyCode::Char('t') if !in_search => {
+            state.show_theme_picker = !state.show_theme_picker;
+            if state.show_theme_picker {
+                // Reset selection to the currently active theme
+                if let Some((idx, _)) = theme::find_theme(&state.theme_name, &state.themes) {
+                    state.theme_selected = idx;
+                    state.theme_scroll = idx.saturating_sub(3);
+                } else {
+                    state.theme_selected = 0;
+                    state.theme_scroll = 0;
+                }
+            } else {
                 restore_saved_theme(state, theme);
             }
+            return false;
+        }
+        KeyCode::Char('l') if !in_search => {
             state.active_tab = Tab::Library;
             return false;
         }
         KeyCode::Char('L') if !in_search => {
-            if state.active_tab == Tab::Themes {
-                restore_saved_theme(state, theme);
-            }
             state.active_tab = Tab::Lyrics;
             return false;
         }
         KeyCode::Char('/') => {
-            if state.active_tab == Tab::Themes {
-                restore_saved_theme(state, theme);
-            }
             state.active_tab = Tab::Search;
             return false;
         }
@@ -891,7 +909,6 @@ fn handle_key(
         Tab::Library => handle_library_key(key, state, tx, backend),
         Tab::Search => handle_search_key(key, state, tx, backend),
         Tab::Lyrics => handle_lyrics_key(key, state),
-        Tab::Themes => handle_themes_key(key, state, theme),
     }
 
     false
@@ -1086,8 +1103,8 @@ fn handle_lyrics_key(key: KeyEvent, state: &mut AppState) {
     }
 }
 
-fn handle_themes_key(key: KeyEvent, state: &mut AppState, theme: &mut Theme) {
-    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, true), state.theme_selected, state.theme_scroll, theme::ALL_THEMES.len()) {
+fn handle_theme_picker_key(key: KeyEvent, state: &mut AppState, theme: &mut Theme) {
+    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, true), state.theme_selected, state.theme_scroll, state.themes.len()) {
         state.theme_selected = sel;
         state.theme_scroll = scr;
         preview_theme(state, theme);
@@ -1095,12 +1112,17 @@ fn handle_themes_key(key: KeyEvent, state: &mut AppState, theme: &mut Theme) {
     }
     match key.code {
         KeyCode::Enter => {
-            if state.theme_selected < theme::ALL_THEMES.len() {
-                let (name, t) = theme::ALL_THEMES[state.theme_selected];
-                state.theme_name = name.to_string();
+            if state.theme_selected < state.themes.len() {
+                let (ref name, t) = state.themes[state.theme_selected];
+                state.theme_name = name.clone();
                 *theme = t;
-                save_theme(name);
+                save_theme(&state.theme_name);
+                state.show_theme_picker = false;
             }
+        }
+        KeyCode::Esc | KeyCode::Char('t') => {
+            restore_saved_theme(state, theme);
+            state.show_theme_picker = false;
         }
         _ => {}
     }
@@ -1131,13 +1153,13 @@ fn handle_playlist_picker_key(key: KeyEvent, state: &mut AppState, _tx: &mpsc::S
 }
 
 fn preview_theme(state: &AppState, theme: &mut Theme) {
-    if state.theme_selected < theme::ALL_THEMES.len() {
-        *theme = theme::ALL_THEMES[state.theme_selected].1;
+    if state.theme_selected < state.themes.len() {
+        *theme = state.themes[state.theme_selected].1;
     }
 }
 
 fn restore_saved_theme(state: &AppState, theme: &mut Theme) {
-    if let Some((_, t)) = theme::find_theme(&state.theme_name) {
+    if let Some((_, t)) = theme::find_theme(&state.theme_name, &state.themes) {
         *theme = t;
     }
 }
@@ -1193,7 +1215,54 @@ fn config_dir() -> std::path::PathBuf {
 }
 
 fn config_file() -> std::path::PathBuf {
-    config_dir().join("config")
+    config_dir().join("config.toml")
+}
+
+/// Read and parse the config file as TOML. Returns None if missing or unparseable.
+fn read_config() -> Option<toml::Value> {
+    let path = config_file();
+    // Migrate legacy plain-text config to TOML on first read
+    if !path.exists() {
+        let legacy = config_dir().join("config");
+        if legacy.exists() {
+            if let Ok(contents) = std::fs::read_to_string(&legacy) {
+                if let Some(migrated) = migrate_legacy_config(&contents) {
+                    let _ = std::fs::write(&path, &migrated);
+                    let _ = std::fs::remove_file(&legacy);
+                    return migrated.parse().ok();
+                }
+            }
+        }
+    }
+    std::fs::read_to_string(&path).ok()?.parse().ok()
+}
+
+/// Convert legacy KEY=VALUE config to TOML format.
+fn migrate_legacy_config(contents: &str) -> Option<String> {
+    let mut lines = Vec::new();
+    let mut spotify_lines = Vec::new();
+    for line in contents.lines() {
+        let parts: Vec<&str> = line.splitn(2, '=').collect();
+        if parts.len() != 2 {
+            continue;
+        }
+        let (key, val) = (parts[0].trim(), parts[1].trim());
+        match key {
+            "backend" => lines.push(format!("backend = \"{}\"", val)),
+            "theme" => lines.push(format!("theme = \"{}\"", val)),
+            "spotify_client_id" => spotify_lines.push(format!("client_id = \"{}\"", val)),
+            _ => {}
+        }
+    }
+    if !spotify_lines.is_empty() {
+        lines.push(String::new());
+        lines.push("[spotify]".to_string());
+        lines.extend(spotify_lines);
+    }
+    if lines.is_empty() {
+        return None;
+    }
+    Some(lines.join("\n") + "\n")
 }
 
 fn dirs_or_home() -> std::path::PathBuf {
@@ -1203,64 +1272,55 @@ fn dirs_or_home() -> std::path::PathBuf {
 }
 
 fn load_config(state: &mut AppState, theme: &mut Theme) {
-    let path = config_file();
-    let Ok(contents) = std::fs::read_to_string(&path) else {
-        return;
-    };
-    for line in contents.lines() {
-        let parts: Vec<&str> = line.splitn(2, '=').collect();
-        if parts.len() == 2 && parts[0].trim() == "theme" {
-            let name = parts[1].trim();
-            if let Some((idx, t)) = theme::find_theme(name) {
-                state.theme_name = name.to_string();
-                state.theme_selected = idx;
-                *theme = t;
-            }
+    let Some(doc) = read_config() else { return };
+    if let Some(name) = doc.get("theme").and_then(|v| v.as_str()) {
+        if let Some((idx, t)) = theme::find_theme(name, &state.themes) {
+            state.theme_name = name.to_string();
+            state.theme_selected = idx;
+            *theme = t;
         }
+    }
+    if let Some(tab) = doc.get("default_tab").and_then(|v| v.as_str()) {
+        if let Some(t) = Tab::from_name(tab) {
+            state.active_tab = t;
+        }
+    }
+    if let Some(val) = doc.get("ui_width") {
+        if val.as_str() == Some("auto") {
+            state.ui_width = 0;
+        } else if let Some(w) = val.as_integer() {
+            state.ui_width = (w as u16).max(40);
+        }
+    }
+    if let Some(show) = doc.get("show_artwork").and_then(|v| v.as_bool()) {
+        state.show_artwork = show;
     }
 }
 
 fn load_backend_config() -> Option<String> {
-    let contents = std::fs::read_to_string(config_file()).ok()?;
-    for line in contents.lines() {
-        let parts: Vec<&str> = line.splitn(2, '=').collect();
-        if parts.len() == 2 && parts[0].trim() == "backend" {
-            return Some(parts[1].trim().to_string());
-        }
-    }
-    None
+    let doc = read_config()?;
+    doc.get("backend")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 #[cfg(feature = "spotify")]
 fn load_spotify_client_id() -> Option<String> {
-    let contents = std::fs::read_to_string(config_file()).ok()?;
-    for line in contents.lines() {
-        let parts: Vec<&str> = line.splitn(2, '=').collect();
-        if parts.len() == 2 && parts[0].trim() == "spotify_client_id" {
-            let val = parts[1].trim().to_string();
-            if !val.is_empty() {
-                return Some(val);
-            }
-        }
-    }
-    None
+    let doc = read_config()?;
+    doc.get("spotify")
+        .and_then(|t| t.get("client_id"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
 }
 
 fn save_theme(name: &str) {
     let dir = config_dir();
     let _ = std::fs::create_dir_all(&dir);
 
-    // Preserve existing config lines, only update theme
     let path = config_file();
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut lines: Vec<String> = existing
-        .lines()
-        .filter(|l| {
-            let parts: Vec<&str> = l.splitn(2, '=').collect();
-            parts.len() != 2 || parts[0].trim() != "theme"
-        })
-        .map(|l| l.to_string())
-        .collect();
-    lines.push(format!("theme={}", name));
-    let _ = std::fs::write(path, lines.join("\n") + "\n");
+    let mut doc: toml::Table = existing.parse().unwrap_or_default();
+    doc.insert("theme".to_string(), toml::Value::String(name.to_string()));
+    let _ = std::fs::write(path, toml::to_string_pretty(&doc).unwrap_or_default());
 }

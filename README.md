@@ -21,7 +21,7 @@ A terminal UI for controlling Apple Music and Spotify on macOS.
 - Lyrics display fetched from LRCLIB (with embedded lyrics fallback)
 - Album art display via sixel graphics in supported terminals
 - Vim-style navigation (j/k, g/G, Ctrl+F/Ctrl+B)
-- Customizable color themes
+- Customizable color themes (TOML config files, user-extensible)
 
 ## Requirements
 
@@ -46,19 +46,42 @@ cargo build --release --no-default-features --features spotify
 
 ## Configuration
 
-Config file: `~/.config/muse/config`
+Config file: `~/.config/muse/config.toml`
 
+```toml
+backend = "spotify"              # optional, default is "apple_music"
+theme = "synthwave"              # color theme (filename without .toml)
+default_tab = "queue"            # tab shown on launch: queue, library, search, lyrics
+ui_width = 120                   # max UI width in columns (min 40, or "auto")
+show_artwork = true              # display album art (requires sixel/kitty/iTerm2)
+
+[spotify]
+client_id = "YOUR_ID"            # required if backend = "spotify"
 ```
-backend=spotify              # optional, default is apple_music
-spotify_client_id=YOUR_ID    # required if backend=spotify
-theme=synthwave              # color theme
+
+### Custom Themes
+
+Themes live in `~/.config/muse/themes/` as TOML files. Six defaults are included (synthwave, monochrome, ocean, sunset, matrix, tokyo-night-moon). To create a custom theme, add a `.toml` file:
+
+```toml
+[colors]
+border = 75        # 256-color index (0-255)
+accent = 213
+text = 252
+text_bright = 255
+text_dim = 245
+text_muted = 240
+time_text = 255
+error = 196
 ```
+
+Colors can be 256-color indices (integers) or hex RGB strings (`"#82aaff"`).
 
 ### Spotify Setup
 
 1. Create an app at [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
 2. Add `http://localhost:18234/callback` as a redirect URI
-3. Add `backend=spotify` and `spotify_client_id=YOUR_ID` to your config
+3. Add `backend = "spotify"` and `[spotify] client_id = "YOUR_ID"` to your config
 4. Run `muse` — it will open your browser for login on first launch
 
 ## Usage
@@ -96,6 +119,7 @@ Launch `muse` in any terminal. The player panel at the top always shows the curr
 | `Home` / `End` | Jump to top / bottom |
 | `Enter` | Play track / Browse playlist |
 | `Backspace` | Back (library) / Clear (search) |
+| `t` | Theme picker |
 | `?` | Toggle help overlay |
 | `q` | Quit |
 
@@ -105,7 +129,8 @@ Launch `muse` in any terminal. The player panel at the top always shows the curr
 - **Library** — browse your playlists. Press Enter to see tracks, Enter again to play. Press `d` to remove a track from the playlist. Backspace goes back to the playlist list.
 - **Search** — type to search your library. Results appear as you type (minimum 2 characters). Enter plays the selected result.
 - **Lyrics** — displays lyrics for the current track. Fetched from [LRCLIB](https://lrclib.net) (falls back to embedded lyrics if available). Scroll with arrow keys. Shows "No lyrics available" when none are found.
-- **Themes** — select a color theme. Press Enter to apply.
+
+Press `t` from any tab to open the theme picker overlay. Navigate with arrow keys, preview live, and press Enter to apply. Themes are loaded from `~/.config/muse/themes/` as TOML files. Default themes are written on first run. Add your own by creating a new `.toml` file in that directory.
 
 Playback controls (`space`, `n`, `p`, `+`/`-`, `s`, `r`) work from any tab. In the Search tab, letter keys are captured for typing, so `n`/`p`/`s`/`r`/`a` only work as playback controls from the other tabs.
 
