@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, BorderType, Gauge, List, ListItem, ListState, Paragraph, Tabs},
+    widgets::{Block, Borders, BorderType, Clear, Gauge, List, ListItem, ListState, Paragraph, Tabs},
     Frame,
 };
 use ratatui_image::{StatefulImage, protocol::StatefulProtocol};
@@ -260,15 +260,14 @@ fn draw_tab_content(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) 
         draw_playlist_picker(f, area, state, theme);
         return;
     }
-    if state.show_theme_picker {
-        draw_theme_picker(f, area, state, theme);
-        return;
-    }
     match state.active_tab {
         Tab::Queue => draw_queue(f, area, state, theme),
         Tab::Library => draw_library(f, area, state, theme),
         Tab::Search => draw_search(f, area, state, theme),
         Tab::Lyrics => draw_lyrics(f, area, state, theme),
+    }
+    if state.show_theme_picker {
+        draw_theme_picker(f, area, state, theme);
     }
 }
 
@@ -520,18 +519,31 @@ fn draw_lyrics(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
 }
 
 fn draw_theme_picker(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
-    let rows = Layout::vertical([Constraint::Length(2), Constraint::Min(1)]).split(area);
+    // Size the popup to fit content with padding
+    let max_name_len = state.themes.iter().map(|(n, _)| n.len()).max().unwrap_or(10);
+    let popup_w = (max_name_len as u16 + 8).min(area.width.saturating_sub(4)); // "▸ " + name + " ✓" + padding
+    let popup_h = (state.themes.len() as u16 + 2).min(area.height.saturating_sub(2)); // +2 for border
 
-    f.render_widget(
-        Paragraph::new(Span::styled(
-            "Themes",
+    let x = area.x + (area.width.saturating_sub(popup_w)) / 2;
+    let y = area.y + (area.height.saturating_sub(popup_h)) / 2;
+    let popup = Rect::new(x, y, popup_w, popup_h);
+
+    // Clear the area behind the popup
+    f.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .title(Span::styled(
+            " Themes ",
             Style::default()
                 .fg(theme.accent)
                 .add_modifier(Modifier::BOLD),
         ))
-        .alignment(Alignment::Center),
-        rows[0],
-    );
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.border));
+
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
 
     let items: Vec<ListItem> = state
         .themes
@@ -556,7 +568,7 @@ fn draw_theme_picker(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme)
         .collect();
 
     let mut list_state = ListState::default().with_offset(state.theme_scroll);
-    f.render_stateful_widget(List::new(items), rows[1], &mut list_state);
+    f.render_stateful_widget(List::new(items), inner, &mut list_state);
 }
 
 fn draw_help_overlay(f: &mut Frame, area: Rect, theme: &Theme) {
