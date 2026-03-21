@@ -9,7 +9,6 @@ use ratatui::{
 };
 use ratatui_image::{StatefulImage, protocol::StatefulProtocol};
 
-use crate::backend::PlayerState;
 use crate::state::{AppState, LibrarySubView, Tab};
 use crate::theme::Theme;
 
@@ -194,12 +193,7 @@ fn draw_player_section(
         ));
     f.render_widget(gauge, rows[4]);
 
-    // Controls
-    let play_icon = if state.player_state == PlayerState::Playing {
-        "▐▐"
-    } else {
-        " ▶"
-    };
+    // Controls — status-only (keybindings shown in help line)
     let shuffle_str = if state.shuffle_enabled {
         "⤮ on "
     } else {
@@ -207,10 +201,7 @@ fn draw_player_section(
     };
     let repeat_str = format!("⟳ {}", state.repeat_mode.label());
     let vol_str = format!("Vol: {}%", state.volume);
-    let controls = format!(
-        " ◂◂  {}  ▸▸   {}  {}  {} ",
-        play_icon, shuffle_str, repeat_str, vol_str
-    );
+    let controls = format!("{}  {}  {}", shuffle_str, repeat_str, vol_str);
     f.render_widget(
         Paragraph::new(Span::styled(controls, Style::default().fg(theme.text)))
             .alignment(Alignment::Center),
@@ -414,14 +405,23 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
 }
 
 fn draw_search(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
-    let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
+    let rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(1)]).split(area);
 
-    // Search input
-    let prompt = format!("/ {}▏", state.search_query);
-    f.render_widget(
-        Paragraph::new(Span::styled(prompt, Style::default().fg(theme.text))),
-        rows[0],
-    );
+    // Search input — accent color + cursor when editing, dimmed when browsing
+    if state.search_editing {
+        let search_line = Line::from(vec![
+            Span::styled("/ ", Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{}▏", state.search_query), Style::default().fg(theme.accent)),
+            Span::styled("  Enter to browse · Esc to stop", Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM)),
+        ]);
+        f.render_widget(Paragraph::new(search_line), rows[0]);
+    } else {
+        let search_line = Line::from(vec![
+            Span::styled(format!("/ {}", state.search_query), Style::default().fg(theme.text_dim)),
+            Span::styled("  / to edit", Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM)),
+        ]);
+        f.render_widget(Paragraph::new(search_line), rows[0]);
+    }
 
     if state.search_results.is_empty() {
         if !state.search_query.is_empty() {
@@ -431,7 +431,7 @@ fn draw_search(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
                     Style::default().fg(theme.text_dim),
                 ))
                 .alignment(Alignment::Center),
-                rows[1],
+                rows[2],
             );
         }
         return;
@@ -442,12 +442,15 @@ fn draw_search(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
         .iter()
         .enumerate()
         .map(|(i, r)| {
-            let marker = if i == state.search_selected {
+            let marker = if !state.search_editing && i == state.search_selected {
                 "▸ "
             } else {
                 "  "
             };
-            let style = if i == state.search_selected {
+            let style = if state.search_editing {
+                // Editing: dim all results to show focus is on the search bar
+                Style::default().fg(theme.text_dim)
+            } else if i == state.search_selected {
                 Style::default()
                     .fg(theme.accent)
                     .add_modifier(Modifier::BOLD)
@@ -462,7 +465,7 @@ fn draw_search(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
         .collect();
 
     let mut list_state = ListState::default().with_offset(state.search_scroll);
-    f.render_stateful_widget(List::new(items), rows[1], &mut list_state);
+    f.render_stateful_widget(List::new(items), rows[2], &mut list_state);
 }
 
 fn draw_lyrics(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
@@ -693,7 +696,11 @@ fn draw_playlist_picker(f: &mut Frame, area: Rect, state: &AppState, theme: &The
 }
 
 fn draw_help_line(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
-    let left = "? Help · q Quit";
+    let left = if state.active_tab == Tab::Search && state.search_editing {
+        "Enter browse · Esc stop editing"
+    } else {
+        "space play · n/p next/prev · s shuf · r repeat · ? Help · q Quit"
+    };
     let right = &state.lastfm_status;
 
     if right.is_empty() {

@@ -25,7 +25,6 @@
 
 ## Done
 
-- [x] Fix progress bar time text readability across themes (monochrome, sunset, purple, fire) #bug
 - [x] Spotify port — `MusicBackend` trait in `backend.rs`, Apple Music refactored behind it in `bridge.rs` #refactor
 - [x] `SpotifyBackend` in `spotify.rs` via Spotify Web API (ureq HTTP) #feature
 - [x] OAuth 2.0 PKCE flow (browser open → localhost:18234 callback → token cached at `~/.config/muse/spotify_token.json`) #feature
