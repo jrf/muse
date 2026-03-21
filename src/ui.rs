@@ -699,7 +699,7 @@ fn draw_help_line(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     let left = if state.active_tab == Tab::Search && state.search_editing {
         "Enter browse · Esc stop editing"
     } else {
-        "space play · n/p next/prev · s shuf · r repeat · ? Help · q Quit"
+        "? Help · q Quit"
     };
     let right = &state.lastfm_status;
 
