@@ -138,8 +138,10 @@ static NOTIFICATION_TX: Mutex<Option<mpsc::Sender<NotificationInfo>>> = Mutex::n
 
 extern "C" fn notification_callback(ptr: *mut c_void) {
     let parsed = parse_notification(ptr);
-    if let Some(tx) = NOTIFICATION_TX.lock().unwrap().as_ref() {
-        let _ = tx.send(parsed);
+    if let Ok(guard) = NOTIFICATION_TX.lock() {
+        if let Some(tx) = guard.as_ref() {
+            let _ = tx.send(parsed);
+        }
     }
 }
 
@@ -351,7 +353,9 @@ impl MusicBackend for AppleMusicBackend {
     }
 
     fn setup_notifications(&self, tx: mpsc::Sender<NotificationInfo>) {
-        NOTIFICATION_TX.lock().unwrap().replace(tx);
+        if let Ok(mut guard) = NOTIFICATION_TX.lock() {
+            guard.replace(tx);
+        }
         unsafe { music_register_notification_callback(notification_callback) }
     }
 

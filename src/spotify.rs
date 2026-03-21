@@ -52,7 +52,9 @@ impl SpotifyBackend {
 
         // Try to load cached token
         if let Some(token) = Self::load_cached_token() {
-            *backend.token.lock().unwrap() = Some(token);
+            if let Ok(mut guard) = backend.token.lock() {
+                *guard = Some(token);
+            }
         }
 
         backend
@@ -147,7 +149,10 @@ impl SpotifyBackend {
 
         let token = Self::parse_token_response(&resp)?;
         Self::save_cached_token(&token);
-        *self.token.lock().unwrap() = Some(token);
+        match self.token.lock() {
+            Ok(mut guard) => *guard = Some(token),
+            Err(_) => return Err("Lock poisoned".to_string()),
+        }
 
         Ok(())
     }
@@ -155,7 +160,7 @@ impl SpotifyBackend {
     // -- Token management --
 
     fn ensure_token(&self) -> Result<String, String> {
-        let mut guard = self.token.lock().unwrap();
+        let mut guard = self.token.lock().map_err(|_| "Lock poisoned".to_string())?;
         let token = guard.as_mut().ok_or("Not authenticated")?;
 
         if token.is_expired() {
@@ -227,7 +232,7 @@ impl SpotifyBackend {
     }
 
     fn is_authenticated(&self) -> bool {
-        self.token.lock().unwrap().is_some()
+        self.token.lock().map(|g| g.is_some()).unwrap_or(false)
     }
 
     // -- PKCE helpers --
@@ -846,7 +851,7 @@ impl MusicBackend for SpotifyBackend {
     fn setup_notifications(&self, tx: mpsc::Sender<NotificationInfo>) {
         // Spawn a polling thread that checks playback state every 2 seconds
         let client_id = self.client_id.clone();
-        let token = self.token.lock().unwrap().clone();
+        let token = self.token.lock().ok().and_then(|g| g.clone());
 
         std::thread::spawn(move || {
             let mut last_track_name = String::new();
