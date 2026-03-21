@@ -98,6 +98,7 @@ pub struct AppState {
     pub search_results: Vec<backend::SearchResult>,
     pub search_selected: usize,
     pub search_scroll: usize,
+    pub search_editing: bool,
 
     // Lyrics
     pub lyrics_lines: Vec<backend::LyricsLine>,
@@ -157,6 +158,7 @@ impl Default for AppState {
             search_results: Vec::new(),
             search_selected: 0,
             search_scroll: 0,
+            search_editing: true,
             lyrics_lines: Vec::new(),
             lyrics_synced: false,
             lyrics_scroll: 0,

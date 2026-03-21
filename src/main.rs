@@ -574,6 +574,7 @@ fn interpolated_state(state: &AppState, last_update: &Instant) -> AppState {
         search_results: state.search_results.clone(),
         search_selected: state.search_selected,
         search_scroll: state.search_scroll,
+        search_editing: state.search_editing,
         lyrics_lines: state.lyrics_lines.clone(),
         lyrics_synced: state.lyrics_synced,
         lyrics_scroll: state.lyrics_scroll,
@@ -774,7 +775,7 @@ fn handle_key(
         return false;
     }
 
-    let in_search = state.active_tab == Tab::Search;
+    let in_search = state.active_tab == Tab::Search && state.search_editing;
 
     // Global keys
     match key.code {
@@ -813,6 +814,7 @@ fn handle_key(
         }
         KeyCode::Char('/') => {
             state.active_tab = Tab::Search;
+            state.search_editing = true;
             return false;
         }
         KeyCode::Char(' ') if !in_search => {
@@ -883,6 +885,7 @@ fn handle_key(
             if let Some(artist) = state.track.as_ref().map(|t| t.artist.clone()) {
                 if !artist.is_empty() {
                     state.active_tab = Tab::Search;
+                    state.search_editing = false;
                     state.search_query = artist;
                     state.search_selected = 0;
                     state.search_scroll = 0;
@@ -895,6 +898,7 @@ fn handle_key(
             if let Some(album) = state.track.as_ref().map(|t| t.album.clone()) {
                 if !album.is_empty() {
                     state.active_tab = Tab::Search;
+                    state.search_editing = false;
                     state.search_query = album;
                     state.search_selected = 0;
                     state.search_scroll = 0;
@@ -1054,39 +1058,65 @@ fn handle_library_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<App
 }
 
 fn handle_search_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppEvent>, backend: &Arc<dyn MusicBackend>) {
-    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, false), state.search_selected, state.search_scroll, state.search_results.len()) {
-        state.search_selected = sel;
-        state.search_scroll = scr;
-        return;
-    }
-    match key.code {
-        KeyCode::Backspace => {
-            if !state.search_query.is_empty() {
-                state.search_query.pop();
-                perform_search(state, tx, backend);
-            } else {
+    if state.search_editing {
+        // Input mode: keystrokes go to the search field
+        match key.code {
+            KeyCode::Esc => {
+                state.search_editing = false;
+            }
+            KeyCode::Enter => {
+                // Submit query and switch to results browsing
+                state.search_editing = false;
+            }
+            KeyCode::Backspace => {
+                if !state.search_query.is_empty() {
+                    state.search_query.pop();
+                    perform_search(state, tx, backend);
+                } else {
+                    state.search_results.clear();
+                    state.search_selected = 0;
+                    state.search_scroll = 0;
+                }
+            }
+            KeyCode::Char(ch) => {
+                if !key.modifiers.contains(KeyModifiers::CONTROL) {
+                    state.search_query.push(ch);
+                    state.search_selected = 0;
+                    state.search_scroll = 0;
+                    perform_search(state, tx, backend);
+                }
+            }
+            _ => {}
+        }
+    } else {
+        // Browse mode: navigate results, global keys work normally
+        if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, true), state.search_selected, state.search_scroll, state.search_results.len()) {
+            state.search_selected = sel;
+            state.search_scroll = scr;
+            return;
+        }
+        match key.code {
+            KeyCode::Char('/') | KeyCode::Char('i') => {
+                state.search_editing = true;
+            }
+            KeyCode::Enter => {
+                if !state.search_results.is_empty()
+                    && state.search_selected < state.search_results.len()
+                {
+                    let result = state.search_results[state.search_selected].clone();
+                    fire_and_refresh(backend, tx, move |b| b.play_track(&result.name, &result.artist));
+                }
+            }
+            KeyCode::Backspace => {
+                // Clear the query and go back to editing
+                state.search_query.clear();
                 state.search_results.clear();
                 state.search_selected = 0;
                 state.search_scroll = 0;
+                state.search_editing = true;
             }
+            _ => {}
         }
-        KeyCode::Enter => {
-            if !state.search_results.is_empty()
-                && state.search_selected < state.search_results.len()
-            {
-                let result = state.search_results[state.search_selected].clone();
-                fire_and_refresh(backend, tx, move |b| b.play_track(&result.name, &result.artist));
-            }
-        }
-        KeyCode::Char(ch) => {
-            if !key.modifiers.contains(KeyModifiers::CONTROL) {
-                state.search_query.push(ch);
-                state.search_selected = 0;
-                state.search_scroll = 0;
-                perform_search(state, tx, backend);
-            }
-        }
-        _ => {}
     }
 }
 
