@@ -280,16 +280,24 @@ fn draw_queue(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
         .iter()
         .enumerate()
         .map(|(i, t)| {
-            let marker = if i == state.queue_selected {
+            let is_selected = i == state.queue_selected;
+            let is_playing = state.queue_playing == Some(i);
+            let marker = if is_selected {
                 "▸ "
+            } else if is_playing {
+                "♫ "
             } else {
                 "  "
             };
             let dur = format_time(t.duration);
             let entry = format!("{}{} — {}", marker, t.name, t.artist);
-            let style = if i == state.queue_selected {
+            let style = if is_selected {
                 Style::default()
                     .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_playing {
+                Style::default()
+                    .fg(theme.text_bright)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(theme.text)

@@ -237,6 +237,7 @@ fn run_app(
             state.queue_playlist_name = playlist_name;
             state.queue_tracks = tracks;
             state.queue_selected = sel;
+            state.queue_playing = Some(sel);
             if sel >= PAGE_SIZE {
                 state.queue_scroll = sel.saturating_sub(3);
             }
@@ -562,6 +563,7 @@ fn interpolated_state(state: &AppState, last_update: &Instant) -> AppState {
         queue_tracks: state.queue_tracks.clone(),
         queue_selected: state.queue_selected,
         queue_scroll: state.queue_scroll,
+        queue_playing: state.queue_playing,
         queue_playlist_name: state.queue_playlist_name.clone(),
         playlists: state.playlists.clone(),
         library_sub_view: state.library_sub_view.clone(),
@@ -666,12 +668,18 @@ fn handle_notification(
             // updated above so a second notification won't fire again).
             // Spotify manages its own queue natively — no intervention needed.
             if was_playing && is_same_track && near_end && backend.needs_queue_advance() {
+                let playing_idx = state.queue_playing.unwrap_or(state.queue_selected);
                 if !state.queue_tracks.is_empty()
-                    && state.queue_selected + 1 < state.queue_tracks.len()
+                    && playing_idx + 1 < state.queue_tracks.len()
                 {
                     // Advance our internal queue
-                    let next_idx = state.queue_selected + 1;
-                    state.queue_selected = next_idx;
+                    let next_idx = playing_idx + 1;
+                    state.queue_playing = Some(next_idx);
+                    playlist::save_queue_state(&state.queue_playlist_name, next_idx, state.queue_tracks.len());
+                    // Move cursor to follow auto-advance only if it was on the playing track
+                    if state.queue_selected == playing_idx {
+                        state.queue_selected = next_idx;
+                    }
                     if next_idx >= state.queue_scroll + PAGE_SIZE {
                         state.queue_scroll = next_idx.saturating_sub(3);
                     }
@@ -706,8 +714,9 @@ fn handle_notification(
             },
         });
 
-        // Sync queue_selected if the new track matches a queue entry
-        // (handles CLI next/prev while TUI is running)
+        // Sync queue_playing if the new track matches a queue entry
+        // (handles CLI next/prev while TUI is running).
+        // Don't move queue_selected — that's the user's cursor.
         if is_new && !state.queue_tracks.is_empty() {
             if let Some(pos) = playlist::sync_queue_selection(
                 &state.queue_tracks,
@@ -715,10 +724,7 @@ fn handle_notification(
                 &info.name,
                 &info.artist,
             ) {
-                state.queue_selected = pos;
-                if pos < state.queue_scroll || pos >= state.queue_scroll + PAGE_SIZE {
-                    state.queue_scroll = pos.saturating_sub(3);
-                }
+                state.queue_playing = Some(pos);
             }
         }
 
@@ -866,6 +872,7 @@ fn handle_key(
             state.queue_tracks.clear();
             state.queue_selected = 0;
             state.queue_scroll = 0;
+            state.queue_playing = None;
             state.queue_playlist_name.clear();
             playlist::clear_queue_state();
             return false;
@@ -950,25 +957,38 @@ fn handle_queue_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<AppEv
     match key.code {
         KeyCode::Enter => {
             if !state.queue_tracks.is_empty() && state.queue_selected < state.queue_tracks.len() {
-                playlist::save_queue_state(&state.queue_playlist_name, state.queue_selected, state.queue_tracks.len());
-                let playlist = state.queue_playlist_name.clone();
                 let idx = state.queue_selected;
+                state.queue_playing = Some(idx);
+                playlist::save_queue_state(&state.queue_playlist_name, idx, state.queue_tracks.len());
+                let playlist = state.queue_playlist_name.clone();
                 fire_and_refresh(backend, tx, move |b| b.play_track_in_playlist(&playlist, idx));
             }
         }
         KeyCode::Char('d') | KeyCode::Char('x') => {
             if !state.queue_tracks.is_empty() && state.queue_selected < state.queue_tracks.len() {
-                state.queue_tracks.remove(state.queue_selected);
+                let removed = state.queue_selected;
+                state.queue_tracks.remove(removed);
                 if state.queue_tracks.is_empty() {
                     state.queue_selected = 0;
                     state.queue_scroll = 0;
+                    state.queue_playing = None;
                     state.queue_playlist_name.clear();
                     playlist::clear_queue_state();
                 } else {
                     if state.queue_selected >= state.queue_tracks.len() {
                         state.queue_selected = state.queue_tracks.len() - 1;
                     }
-                    playlist::save_queue_state(&state.queue_playlist_name, state.queue_selected, state.queue_tracks.len());
+                    // Adjust playing index when removing tracks before/at it
+                    if let Some(ref mut pi) = state.queue_playing {
+                        if removed < *pi {
+                            *pi -= 1;
+                        } else if removed == *pi {
+                            // Removed the playing track — clear playing index
+                            state.queue_playing = None;
+                        }
+                    }
+                    let persist_idx = state.queue_playing.unwrap_or(state.queue_selected);
+                    playlist::save_queue_state(&state.queue_playlist_name, persist_idx, state.queue_tracks.len());
                 }
             }
         }
@@ -1022,6 +1042,7 @@ fn handle_library_key(key: KeyEvent, state: &mut AppState, tx: &mpsc::Sender<App
                         state.queue_tracks = state.playlist_tracks.clone();
                         state.queue_playlist_name = playlist_name.clone();
                         state.queue_selected = idx;
+                        state.queue_playing = Some(idx);
                         if idx < state.queue_scroll || idx >= state.queue_scroll + PAGE_SIZE {
                             state.queue_scroll = idx.saturating_sub(3);
                         }

@@ -82,6 +82,7 @@ pub struct AppState {
     pub queue_tracks: Vec<backend::PlaylistTrack>,
     pub queue_selected: usize,
     pub queue_scroll: usize,
+    pub queue_playing: Option<usize>, // index of the currently playing track (separate from cursor)
     pub queue_playlist_name: String,
 
     // Library
@@ -146,6 +147,7 @@ impl Default for AppState {
             queue_tracks: Vec::new(),
             queue_selected: 0,
             queue_scroll: 0,
+            queue_playing: None,
             queue_playlist_name: String::new(),
             playlists: Vec::new(),
             library_sub_view: LibrarySubView::Playlists,
