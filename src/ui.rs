@@ -2,9 +2,9 @@
 
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, BorderType, Clear, Gauge, List, ListItem, ListState, Paragraph, Tabs},
+    widgets::{Block, Borders, BorderType, Clear, List, ListItem, ListState, Paragraph, Tabs},
     Frame,
 };
 use ratatui_image::{StatefulImage, protocol::StatefulProtocol};
@@ -131,9 +131,9 @@ fn draw_player_section(
         Constraint::Length(1), // [0] blank (top pad)
         Constraint::Length(1), // [1] track name
         Constraint::Length(1), // [2] artist — album
-        Constraint::Length(0), // [3] blank
-        Constraint::Length(3), // [4] progress bar (bordered)
-        Constraint::Length(0), // [5] blank
+        Constraint::Length(1), // [3] blank
+        Constraint::Length(1), // [4] progress bar
+        Constraint::Length(1), // [5] blank
         Constraint::Length(1), // [6] controls
         Constraint::Min(0),    // [7] remaining space (bottom pad)
     ])
@@ -174,24 +174,64 @@ fn draw_player_section(
     } else {
         0.0
     };
+    let bar_width = rows[4].width as usize;
     let time_label = format!(
-        " {} / {} ",
+        "{} / {}",
         format_time(track.position),
         format_time(track.duration)
     );
-    let progress_block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Thick)
-        .border_style(Style::default().fg(theme.border));
-    let gauge = Gauge::default()
-        .block(progress_block)
-        .gauge_style(Style::default().fg(theme.accent))
-        .ratio(progress)
-        .label(Span::styled(
-            time_label,
-            Style::default().fg(theme.time_text),
-        ));
-    f.render_widget(gauge, rows[4]);
+    let filled_count = ((bar_width as f64) * progress).round() as usize;
+    let unfilled_count = bar_width.saturating_sub(filled_count);
+
+    // Build bar string and overlay centered time label
+    let mut bar_chars: Vec<char> = std::iter::repeat('█')
+        .take(filled_count)
+        .chain(std::iter::repeat('░').take(unfilled_count))
+        .collect();
+    // Center the time label over the bar
+    if bar_width >= time_label.len() {
+        let label_start = (bar_width - time_label.len()) / 2;
+        for (i, ch) in time_label.chars().enumerate() {
+            bar_chars[label_start + i] = ch;
+        }
+    }
+    // Build styled spans: each char gets filled or unfilled color,
+    // but label chars get the time_text color
+    let label_start = if bar_width >= time_label.len() {
+        (bar_width - time_label.len()) / 2
+    } else {
+        0
+    };
+    let label_end = label_start + time_label.len();
+    let spans: Vec<Span> = bar_chars
+        .iter()
+        .enumerate()
+        .map(|(i, &ch)| {
+            let is_filled = i < filled_count;
+            let is_label = bar_width >= time_label.len() && i >= label_start && i < label_end;
+            let fg = if is_label {
+                theme.time_text
+            } else if is_filled {
+                theme.accent
+            } else {
+                theme.text_muted
+            };
+            let bg = if is_filled {
+                theme.accent
+            } else {
+                Color::Reset
+            };
+            if is_label {
+                Span::styled(
+                    ch.to_string(),
+                    Style::default().fg(fg).bg(bg),
+                )
+            } else {
+                Span::styled(ch.to_string(), Style::default().fg(fg))
+            }
+        })
+        .collect();
+    f.render_widget(Paragraph::new(Line::from(spans)), rows[4]);
 
     // Controls — status-only (keybindings shown in help line)
     let shuffle_str = if state.shuffle_enabled {
