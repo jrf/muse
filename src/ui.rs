@@ -2,7 +2,7 @@
 
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, BorderType, Clear, List, ListItem, ListState, Paragraph, Tabs},
     Frame,
@@ -168,69 +168,36 @@ fn draw_player_section(
         rows[2],
     );
 
-    // Progress bar
+    // Progress bar with elapsed / total flanking the bar
     let progress = if track.duration > 0.0 {
         (track.position / track.duration).min(1.0)
     } else {
         0.0
     };
-    let bar_width = rows[4].width as usize;
-    let time_label = format!(
-        "{} / {}",
-        format_time(track.position),
-        format_time(track.duration)
-    );
+    let elapsed_str = format!("{} ", format_time(track.position));
+    let total_str = format!(" {}", format_time(track.duration));
+    let bar_width = (rows[4].width as usize)
+        .saturating_sub(elapsed_str.len() + total_str.len());
     let filled_count = ((bar_width as f64) * progress).round() as usize;
     let unfilled_count = bar_width.saturating_sub(filled_count);
 
-    // Build bar string and overlay centered time label
-    let mut bar_chars: Vec<char> = std::iter::repeat('█')
+    let bar: String = std::iter::repeat('█')
         .take(filled_count)
         .chain(std::iter::repeat('░').take(unfilled_count))
         .collect();
-    // Center the time label over the bar
-    if bar_width >= time_label.len() {
-        let label_start = (bar_width - time_label.len()) / 2;
-        for (i, ch) in time_label.chars().enumerate() {
-            bar_chars[label_start + i] = ch;
-        }
-    }
-    // Build styled spans: each char gets filled or unfilled color,
-    // but label chars get the time_text color
-    let label_start = if bar_width >= time_label.len() {
-        (bar_width - time_label.len()) / 2
-    } else {
-        0
-    };
-    let label_end = label_start + time_label.len();
-    let spans: Vec<Span> = bar_chars
-        .iter()
-        .enumerate()
-        .map(|(i, &ch)| {
-            let is_filled = i < filled_count;
-            let is_label = bar_width >= time_label.len() && i >= label_start && i < label_end;
-            let fg = if is_label {
-                theme.time_text
-            } else if is_filled {
-                theme.accent
-            } else {
-                theme.text_muted
-            };
-            let bg = if is_filled {
-                theme.accent
-            } else {
-                Color::Reset
-            };
-            if is_label {
-                Span::styled(
-                    ch.to_string(),
-                    Style::default().fg(fg).bg(bg),
-                )
-            } else {
-                Span::styled(ch.to_string(), Style::default().fg(fg))
-            }
-        })
-        .collect();
+
+    let spans = vec![
+        Span::styled(elapsed_str, Style::default().fg(theme.time_text)),
+        Span::styled(
+            &bar[..bar.len().min(filled_count * '█'.len_utf8())],
+            Style::default().fg(theme.accent),
+        ),
+        Span::styled(
+            &bar[bar.len().min(filled_count * '█'.len_utf8())..],
+            Style::default().fg(theme.text_muted),
+        ),
+        Span::styled(total_str, Style::default().fg(theme.time_text)),
+    ];
     f.render_widget(Paragraph::new(Line::from(spans)), rows[4]);
 
     // Controls — status-only (keybindings shown in help line)
