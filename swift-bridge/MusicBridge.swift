@@ -312,9 +312,13 @@ public func music_state_track_favorited(_ ptr: UnsafeRawPointer) -> Bool {
 public func music_get_playlists() -> UnsafeMutableRawPointer {
     let script = """
     tell application "Music"
-        set playlistNames to name of every user playlist
+        set userNames to name of every user playlist
+        set subNames to name of every subscription playlist
         set output to ""
-        repeat with p in playlistNames
+        repeat with p in userNames
+            set output to output & p & "||"
+        end repeat
+        repeat with p in subNames
             set output to output & p & "||"
         end repeat
         return output
