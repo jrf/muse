@@ -269,6 +269,19 @@ fn draw_tab_content(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) 
     }
 }
 
+fn draw_filter_bar(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
+    let line = Line::from(vec![
+        Span::styled("/ ", Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)),
+        if state.filter_active {
+            Span::styled(format!("{}▏", state.filter_query), Style::default().fg(theme.accent))
+        } else {
+            Span::styled(state.filter_query.clone(), Style::default().fg(theme.accent))
+        },
+        Span::styled("  Esc to clear", Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM)),
+    ]);
+    f.render_widget(Paragraph::new(line), area);
+}
+
 fn draw_queue(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     if state.queue_tracks.is_empty() {
         f.render_widget(
@@ -282,13 +295,43 @@ fn draw_queue(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
         return;
     }
 
-    let items: Vec<ListItem> = state
-        .queue_tracks
+    let has_filter = !state.filter_query.is_empty() || state.filter_active;
+    let (filter_area, list_area) = if has_filter {
+        let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
+        draw_filter_bar(f, rows[0], state, theme);
+        (Some(rows[0]), rows[1])
+    } else {
+        (None, area)
+    };
+    let _ = filter_area;
+
+    // Build filtered indices
+    let filtered: Vec<usize> = if !state.filter_query.is_empty() {
+        let q = state.filter_query.to_lowercase();
+        state.queue_tracks.iter().enumerate()
+            .filter(|(_, t)| t.name.to_lowercase().contains(&q) || t.artist.to_lowercase().contains(&q))
+            .map(|(i, _)| i)
+            .collect()
+    } else {
+        (0..state.queue_tracks.len()).collect()
+    };
+
+    if filtered.is_empty() && has_filter {
+        f.render_widget(
+            Paragraph::new(Span::styled("No matches", Style::default().fg(theme.text_dim)))
+                .alignment(Alignment::Center),
+            list_area,
+        );
+        return;
+    }
+
+    let items: Vec<ListItem> = filtered
         .iter()
         .enumerate()
-        .map(|(i, t)| {
-            let is_selected = i == state.queue_selected;
-            let is_playing = state.queue_playing == Some(i);
+        .map(|(display_idx, &real_idx)| {
+            let t = &state.queue_tracks[real_idx];
+            let is_selected = display_idx == state.queue_selected;
+            let is_playing = state.queue_playing == Some(real_idx);
             let marker = if is_selected {
                 "▸ "
             } else if is_playing {
@@ -318,10 +361,12 @@ fn draw_queue(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
 
     let mut list_state = ListState::default().with_offset(state.queue_scroll);
     let list = List::new(items);
-    f.render_stateful_widget(list, area, &mut list_state);
+    f.render_stateful_widget(list, list_area, &mut list_state);
 }
 
 fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
+    let has_filter = !state.filter_query.is_empty() || state.filter_active;
+
     match &state.library_sub_view {
         LibrarySubView::Playlists => {
             if state.playlists.is_empty() {
@@ -335,17 +380,40 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
                 );
                 return;
             }
-            let items: Vec<ListItem> = state
-                .playlists
+
+            let (list_area, filtered) = if has_filter {
+                let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
+                draw_filter_bar(f, rows[0], state, theme);
+                let q = state.filter_query.to_lowercase();
+                let indices: Vec<usize> = state.playlists.iter().enumerate()
+                    .filter(|(_, s)| s.to_lowercase().contains(&q))
+                    .map(|(i, _)| i)
+                    .collect();
+                (rows[1], indices)
+            } else {
+                (area, (0..state.playlists.len()).collect())
+            };
+
+            if filtered.is_empty() && has_filter {
+                f.render_widget(
+                    Paragraph::new(Span::styled("No matches", Style::default().fg(theme.text_dim)))
+                        .alignment(Alignment::Center),
+                    list_area,
+                );
+                return;
+            }
+
+            let items: Vec<ListItem> = filtered
                 .iter()
                 .enumerate()
-                .map(|(i, name)| {
-                    let marker = if i == state.library_selected {
+                .map(|(display_idx, &real_idx)| {
+                    let name = &state.playlists[real_idx];
+                    let marker = if display_idx == state.library_selected {
                         "▸ "
                     } else {
                         "  "
                     };
-                    let style = if i == state.library_selected {
+                    let style = if display_idx == state.library_selected {
                         Style::default()
                             .fg(theme.accent)
                             .add_modifier(Modifier::BOLD)
@@ -357,10 +425,16 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
                 .collect();
 
             let mut list_state = ListState::default().with_offset(state.library_scroll);
-            f.render_stateful_widget(List::new(items), area, &mut list_state);
+            f.render_stateful_widget(List::new(items), list_area, &mut list_state);
         }
         LibrarySubView::Tracks(playlist_name) => {
-            let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
+            // Header rows: back button + optional filter bar
+            let mut constraints: Vec<Constraint> = vec![Constraint::Length(1)];
+            if has_filter {
+                constraints.push(Constraint::Length(1));
+            }
+            constraints.push(Constraint::Min(1));
+            let rows = Layout::vertical(constraints).split(area);
 
             // Back header
             f.render_widget(
@@ -373,6 +447,13 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
                 rows[0],
             );
 
+            let list_area = if has_filter {
+                draw_filter_bar(f, rows[1], state, theme);
+                rows[2]
+            } else {
+                rows[1]
+            };
+
             if state.playlist_tracks.is_empty() {
                 f.render_widget(
                     Paragraph::new(Span::styled(
@@ -380,21 +461,40 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
                         Style::default().fg(theme.text_dim),
                     ))
                     .alignment(Alignment::Center),
-                    rows[1],
+                    list_area,
                 );
             } else {
-                let items: Vec<ListItem> = state
-                    .playlist_tracks
+                let filtered: Vec<usize> = if !state.filter_query.is_empty() {
+                    let q = state.filter_query.to_lowercase();
+                    state.playlist_tracks.iter().enumerate()
+                        .filter(|(_, t)| t.name.to_lowercase().contains(&q) || t.artist.to_lowercase().contains(&q))
+                        .map(|(i, _)| i)
+                        .collect()
+                } else {
+                    (0..state.playlist_tracks.len()).collect()
+                };
+
+                if filtered.is_empty() && has_filter {
+                    f.render_widget(
+                        Paragraph::new(Span::styled("No matches", Style::default().fg(theme.text_dim)))
+                            .alignment(Alignment::Center),
+                        list_area,
+                    );
+                    return;
+                }
+
+                let items: Vec<ListItem> = filtered
                     .iter()
                     .enumerate()
-                    .map(|(i, t)| {
-                        let marker = if i == state.playlist_tracks_selected {
+                    .map(|(display_idx, &real_idx)| {
+                        let t = &state.playlist_tracks[real_idx];
+                        let marker = if display_idx == state.playlist_tracks_selected {
                             "▸ "
                         } else {
                             "  "
                         };
                         let dur = format_time(t.duration);
-                        let style = if i == state.playlist_tracks_selected {
+                        let style = if display_idx == state.playlist_tracks_selected {
                             Style::default()
                                 .fg(theme.accent)
                                 .add_modifier(Modifier::BOLD)
@@ -413,7 +513,7 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
 
                 let mut list_state =
                     ListState::default().with_offset(state.playlist_tracks_scroll);
-                f.render_stateful_widget(List::new(items), rows[1], &mut list_state);
+                f.render_stateful_widget(List::new(items), list_area, &mut list_state);
             }
         }
     }
@@ -593,7 +693,7 @@ fn draw_help_overlay(f: &mut Frame, area: Rect, theme: &Theme) {
     let bindings = [
         ("Tab / Shift+Tab", "Cycle tabs"),
         ("l", "Library tab"),
-        ("/", "Search tab"),
+        ("/", "Filter / Search"),
         ("space", "Play / Pause"),
         ("n", "Next track"),
         ("p", "Previous track"),

@@ -55,3 +55,4 @@
 - [x] Search artist (`a`) and search album (`A`) keybindings #feature
 - [x] Open artist (`o`) and album (`O`) in Music.app #feature
 - [x] Playlist picker overlay and favorite toggle #feature
+- [x] Inline fuzzy filter (`/`) for Queue and Library tabs — filter tracks and playlists by name/artist #feature

@@ -118,6 +118,7 @@ Launch `muse` in any terminal. The player panel at the top always shows the curr
 | `PgUp` / `PgDn` | Page up / down |
 | `Home` / `End` | Jump to top / bottom |
 | `Enter` | Play track / Browse playlist |
+| `/` | Filter list (queue/library) / Search |
 | `Backspace` | Back (library) / Clear (search) |
 | `t` | Theme picker |
 | `?` | Toggle help overlay |
@@ -125,14 +126,14 @@ Launch `muse` in any terminal. The player panel at the top always shows the curr
 
 ### Tabs
 
-- **Queue** — tracks from the last playlist you played. Select a track and press Enter to jump to it. Tracks auto-advance when the current one finishes. Press `d` to remove a track.
-- **Library** — browse your playlists. Press Enter to see tracks, Enter again to play. Press `d` to remove a track from the playlist. Backspace goes back to the playlist list.
+- **Queue** — tracks from the last playlist you played. Select a track and press Enter to jump to it. Tracks auto-advance when the current one finishes. Press `d` to remove a track. Press `/` to filter by name or artist.
+- **Library** — browse your playlists. Press Enter to see tracks, Enter again to play. Press `d` to remove a track from the playlist. Backspace goes back to the playlist list. Press `/` to filter playlists or tracks.
 - **Search** — type to search your library. Results appear as you type (minimum 2 characters). Enter plays the selected result.
 - **Lyrics** — displays lyrics for the current track. Fetched from [LRCLIB](https://lrclib.net) (falls back to embedded lyrics if available). Scroll with arrow keys. Shows "No lyrics available" when none are found.
 
 Press `t` from any tab to open the theme picker overlay. Navigate with arrow keys, preview live, and press Enter to apply. Themes are loaded from `~/.config/muse/themes/` as TOML files. Default themes are written on first run. Add your own by creating a new `.toml` file in that directory.
 
-Playback controls (`space`, `n`, `p`, `+`/`-`, `s`, `r`) work from any tab. In the Search tab, letter keys are captured for typing, so `n`/`p`/`s`/`r`/`a` only work as playback controls from the other tabs.
+Playback controls (`space`, `n`, `p`, `+`/`-`, `s`, `r`) work from any tab. In the Search tab or while filtering, letter keys are captured for typing, so `n`/`p`/`s`/`r`/`a` only work as playback controls from the other tabs.
 
 ### Album Art
 

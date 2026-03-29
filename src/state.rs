@@ -128,6 +128,10 @@ pub struct AppState {
 
     // Last.fm
     pub lastfm_status: String,
+
+    // Filter (shared across Queue and Library)
+    pub filter_query: String,
+    pub filter_active: bool,
 }
 
 impl Default for AppState {
@@ -177,6 +181,8 @@ impl Default for AppState {
             playlist_picker_selected: 0,
             playlist_picker_scroll: 0,
             lastfm_status: String::new(),
+            filter_query: String::new(),
+            filter_active: false,
         }
     }
 }
