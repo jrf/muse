@@ -422,7 +422,7 @@ fn run_app(
                     }
 
                     // Fetch lyrics for new track if needed
-                    if !info.name.is_empty() {
+                    if state.lyrics_enabled && !info.name.is_empty() {
                         let lyrics_key = format!("{}\t{}", info.name, info.artist);
                         if lyrics_key != state.lyrics_track_key {
                             state.lyrics_track_key = lyrics_key.clone();
@@ -585,6 +585,7 @@ fn interpolated_state(state: &AppState, last_update: &Instant) -> AppState {
     let mut display = AppState {
         ui_width: state.ui_width,
         show_artwork: state.show_artwork,
+        lyrics_enabled: state.lyrics_enabled,
         track: state.track.clone(),
         artwork: None, // artwork is rendered separately via mutable ref
         artwork_key: state.artwork_key.clone(),
@@ -1550,6 +1551,9 @@ fn load_config(state: &mut AppState, theme: &mut Theme) {
     }
     if let Some(show) = doc.get("show_artwork").and_then(|v| v.as_bool()) {
         state.show_artwork = show;
+    }
+    if let Some(enabled) = doc.get("lyrics_enabled").and_then(|v| v.as_bool()) {
+        state.lyrics_enabled = enabled;
     }
 }
 

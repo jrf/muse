@@ -64,6 +64,7 @@ pub struct AppState {
     // Config
     pub ui_width: u16,
     pub show_artwork: bool,
+    pub lyrics_enabled: bool,
 
     // Player
     pub track: Option<backend::Track>,
@@ -139,6 +140,7 @@ impl Default for AppState {
         Self {
             ui_width: 120,
             show_artwork: true,
+            lyrics_enabled: true,
             track: None,
             artwork: None,
             artwork_key: String::new(),

@@ -585,12 +585,14 @@ fn draw_search(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
 
 fn draw_lyrics(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     if state.lyrics_lines.is_empty() {
+        let msg = if state.lyrics_enabled {
+            "No lyrics available"
+        } else {
+            "Lyrics disabled in config"
+        };
         f.render_widget(
-            Paragraph::new(Span::styled(
-                "No lyrics available",
-                Style::default().fg(theme.text_dim),
-            ))
-            .alignment(Alignment::Center),
+            Paragraph::new(Span::styled(msg, Style::default().fg(theme.text_dim)))
+                .alignment(Alignment::Center),
             area,
         );
         return;
