@@ -1278,6 +1278,7 @@ version = "0.1.0"
 dependencies = [
  "crossterm 0.28.1",
  "image",
+ "rand 0.8.5",
  "ratatui",
  "ratatui-image",
  "serde",

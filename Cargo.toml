@@ -6,7 +6,7 @@ edition = "2021"
 [features]
 default = ["apple-music", "spotify"]
 apple-music = []
-spotify = ["dep:ureq", "dep:serde", "dep:serde_json"]
+spotify = ["dep:ureq", "dep:serde", "dep:serde_json", "dep:rand"]
 
 [dependencies]
 ratatui = "0.30"
@@ -20,3 +20,4 @@ toml = "0.8"
 ureq = { version = "2", features = ["json"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
+rand = { version = "0.8", optional = true }

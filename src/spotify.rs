@@ -238,28 +238,12 @@ impl SpotifyBackend {
     // -- PKCE helpers --
 
     fn pkce_pair() -> (String, String) {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
+        use rand::RngCore;
 
-        // Generate a random 64-byte verifier using available entropy
         let mut verifier_bytes = [0u8; 64];
-        let seed = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let mut hasher = DefaultHasher::new();
-        seed.hash(&mut hasher);
-        std::process::id().hash(&mut hasher);
-        let mut state = hasher.finish();
-        for byte in verifier_bytes.iter_mut() {
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-            *byte = (state >> 33) as u8;
-        }
-
-        // Base64url encode the verifier
+        rand::thread_rng().fill_bytes(&mut verifier_bytes);
         let verifier = base64url_encode(&verifier_bytes);
 
-        // SHA-256 hash for challenge
         let challenge = {
             let hash = sha256(verifier.as_bytes());
             base64url_encode(&hash)
