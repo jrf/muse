@@ -9,10 +9,57 @@ use ratatui::{
 };
 use ratatui_image::{StatefulImage, protocol::StatefulProtocol};
 
+use crate::backend;
 use crate::state::{AppState, LibrarySubView, Tab};
 use crate::theme::Theme;
 
-pub fn draw(f: &mut Frame, state: &AppState, theme: &Theme, artwork: &mut Option<StatefulProtocol>) {
+/// Entry point. Takes &mut AppState so we can avoid cloning the whole struct
+/// for render-time interpolation: we temporarily move artwork out (so &state
+/// is freely borrowable), apply auto-scroll for synced lyrics, then render
+/// with the effective (interpolated) track position derived from `elapsed`.
+pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme, elapsed: f64) {
+    let effective_position = effective_track_position(state, elapsed);
+    apply_lyrics_autoscroll(state, effective_position);
+    let mut artwork = state.artwork.take();
+    do_draw(f, &*state, theme, &mut artwork, effective_position);
+    state.artwork = artwork;
+}
+
+fn effective_track_position(state: &AppState, elapsed: f64) -> Option<f64> {
+    let track = state.track.as_ref()?;
+    if state.player_state == backend::PlayerState::Playing {
+        Some((track.position + elapsed).min(track.duration))
+    } else {
+        Some(track.position)
+    }
+}
+
+fn apply_lyrics_autoscroll(state: &mut AppState, effective_position: Option<f64>) {
+    if !state.lyrics_synced || state.lyrics_manual_scroll {
+        return;
+    }
+    let Some(pos) = effective_position else { return };
+    let current_idx = state
+        .lyrics_lines
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, l)| l.time.map_or(false, |t| t <= pos))
+        .map(|(i, _)| i);
+    let Some(idx) = current_idx else { return };
+    let max_rows = 20; // approximate; corrected by actual render area
+    let target = idx.saturating_sub(max_rows / 2);
+    let max_scroll = state.lyrics_lines.len().saturating_sub(max_rows);
+    state.lyrics_scroll = target.min(max_scroll);
+}
+
+fn do_draw(
+    f: &mut Frame,
+    state: &AppState,
+    theme: &Theme,
+    artwork: &mut Option<StatefulProtocol>,
+    effective_position: Option<f64>,
+) {
     let area = f.area();
 
     let box_w = if state.ui_width == 0 {
@@ -53,10 +100,10 @@ pub fn draw(f: &mut Frame, state: &AppState, theme: &Theme, artwork: &mut Option
     ])
     .split(content_area);
 
-    draw_player_section(f, chunks[0], state, theme, artwork);
+    draw_player_section(f, chunks[0], state, theme, artwork, effective_position);
     draw_tab_bar(f, chunks[1], state, theme);
     // chunks[2] is the gap (empty)
-    draw_tab_content(f, chunks[3], state, theme);
+    draw_tab_content(f, chunks[3], state, theme, effective_position);
     draw_help_line(f, chunks[4], state, theme);
 }
 
@@ -76,6 +123,7 @@ fn draw_player_section(
     state: &AppState,
     theme: &Theme,
     artwork: &mut Option<StatefulProtocol>,
+    effective_position: Option<f64>,
 ) {
     if !state.music_running {
         let lines = vec![
@@ -169,12 +217,13 @@ fn draw_player_section(
     );
 
     // Progress bar with elapsed / total flanking the bar
+    let display_position = effective_position.unwrap_or(track.position);
     let progress = if track.duration > 0.0 {
-        (track.position / track.duration).min(1.0)
+        (display_position / track.duration).min(1.0)
     } else {
         0.0
     };
-    let elapsed_str = format!("{} ", format_time(track.position));
+    let elapsed_str = format!("{} ", format_time(display_position));
     let total_str = format!(" {}", format_time(track.duration));
     let bar_width = (rows[4].width as usize)
         .saturating_sub(elapsed_str.len() + total_str.len());
@@ -249,7 +298,13 @@ fn draw_tab_bar(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     f.render_widget(tabs, area);
 }
 
-fn draw_tab_content(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
+fn draw_tab_content(
+    f: &mut Frame,
+    area: Rect,
+    state: &AppState,
+    theme: &Theme,
+    effective_position: Option<f64>,
+) {
     if state.show_help {
         draw_help_overlay(f, area, theme);
         return;
@@ -262,7 +317,7 @@ fn draw_tab_content(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) 
         Tab::Queue => draw_queue(f, area, state, theme),
         Tab::Library => draw_library(f, area, state, theme),
         Tab::Search => draw_search(f, area, state, theme),
-        Tab::Lyrics => draw_lyrics(f, area, state, theme),
+        Tab::Lyrics => draw_lyrics(f, area, state, theme, effective_position),
     }
     if state.show_theme_picker {
         draw_theme_picker(f, area, state, theme);
@@ -632,7 +687,13 @@ fn draw_search(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     f.render_stateful_widget(List::new(items), rows[2], &mut list_state);
 }
 
-fn draw_lyrics(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
+fn draw_lyrics(
+    f: &mut Frame,
+    area: Rect,
+    state: &AppState,
+    theme: &Theme,
+    effective_position: Option<f64>,
+) {
     if state.lyrics_lines.is_empty() {
         let msg = if state.lyrics_enabled {
             "No lyrics available"
@@ -649,18 +710,15 @@ fn draw_lyrics(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
 
     // Find current line index for synced lyrics
     let current_line = if state.lyrics_synced {
-        state
-            .track
-            .as_ref()
-            .and_then(|t| {
-                state
-                    .lyrics_lines
-                    .iter()
-                    .enumerate()
-                    .rev()
-                    .find(|(_, l)| l.time.map_or(false, |time| time <= t.position))
-                    .map(|(i, _)| i)
-            })
+        effective_position.and_then(|pos| {
+            state
+                .lyrics_lines
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, l)| l.time.map_or(false, |time| time <= pos))
+                .map(|(i, _)| i)
+        })
     } else {
         None
     };

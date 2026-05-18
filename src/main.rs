@@ -351,9 +351,15 @@ fn run_app(
     });
 
     loop {
-        // Render
-        let display_state = interpolated_state(&state, &last_position_update);
-        terminal.draw(|f| ui::draw(f, &display_state, &current_theme, &mut state.artwork))?;
+        // Render — pass elapsed-since-last-position-update to ui::draw so it
+        // can interpolate the displayed track position without us cloning
+        // AppState every tick.
+        let elapsed = if state.player_state == backend::PlayerState::Playing {
+            last_position_update.elapsed().as_secs_f64()
+        } else {
+            0.0
+        };
+        terminal.draw(|f| ui::draw(f, &mut state, &current_theme, elapsed))?;
 
         // Wait for events (short timeout to keep rendering smooth)
         match rx.recv_timeout(Duration::from_millis(50)) {
@@ -599,90 +605,6 @@ fn apply_fresh_state(
         state.artwork_key.clear();
         state.artwork = None;
     }
-}
-
-fn interpolated_state(state: &AppState, last_update: &Instant) -> AppState {
-    let mut display = AppState {
-        ui_width: state.ui_width,
-        show_artwork: state.show_artwork,
-        lyrics_enabled: state.lyrics_enabled,
-        track: state.track.clone(),
-        artwork: None, // artwork is rendered separately via mutable ref
-        artwork_key: state.artwork_key.clone(),
-        player_state: state.player_state,
-        volume: state.volume,
-        shuffle_enabled: state.shuffle_enabled,
-        repeat_mode: state.repeat_mode,
-        music_running: state.music_running,
-        active_tab: state.active_tab,
-        queue_tracks: state.queue_tracks.clone(),
-        queue_selected: state.queue_selected,
-        queue_scroll: state.queue_scroll,
-        queue_playing: state.queue_playing,
-        queue_playlist_name: state.queue_playlist_name.clone(),
-        playlists: state.playlists.clone(),
-        library_sub_view: state.library_sub_view.clone(),
-        library_selected: state.library_selected,
-        library_scroll: state.library_scroll,
-        playlist_tracks: state.playlist_tracks.clone(),
-        playlist_tracks_selected: state.playlist_tracks_selected,
-        playlist_tracks_scroll: state.playlist_tracks_scroll,
-        search_query: state.search_query.clone(),
-        search_results: state.search_results.clone(),
-        search_selected: state.search_selected,
-        search_scroll: state.search_scroll,
-        search_editing: state.search_editing,
-        lyrics_lines: state.lyrics_lines.clone(),
-        lyrics_synced: state.lyrics_synced,
-        lyrics_scroll: state.lyrics_scroll,
-        lyrics_manual_scroll: state.lyrics_manual_scroll,
-        lyrics_track_key: state.lyrics_track_key.clone(),
-        themes: state.themes.clone(),
-        theme_name: state.theme_name.clone(),
-        theme_selected: state.theme_selected,
-        theme_scroll: state.theme_scroll,
-        show_theme_picker: state.show_theme_picker,
-        show_help: state.show_help,
-        current_track_favorited: state.current_track_favorited,
-        show_playlist_picker: state.show_playlist_picker,
-        playlist_picker_selected: state.playlist_picker_selected,
-        playlist_picker_scroll: state.playlist_picker_scroll,
-        lastfm_status: state.lastfm_status.clone(),
-        filter_query: state.filter_query.clone(),
-        filter_active: state.filter_active,
-        error_message: state.error_message.clone(),
-    };
-
-    // Interpolate position when playing
-    if state.player_state == backend::PlayerState::Playing {
-        if let Some(ref mut track) = display.track {
-            let elapsed = last_update.elapsed().as_secs_f64();
-            track.position = (track.position + elapsed).min(track.duration);
-        }
-    }
-
-    // Auto-scroll lyrics
-    if display.lyrics_synced && !display.lyrics_manual_scroll {
-        if let Some(current_idx) = display.track.as_ref().and_then(|t| {
-            display
-                .lyrics_lines
-                .iter()
-                .enumerate()
-                .rev()
-                .find(|(_, l)| l.time.map_or(false, |time| time <= t.position))
-                .map(|(i, _)| i)
-        }) {
-            let max_rows = 20; // approximate; will be corrected by actual render area
-            let target = current_idx.saturating_sub(max_rows / 2);
-            let max_scroll = display
-                .lyrics_lines
-                .len()
-                .saturating_sub(max_rows);
-            display.lyrics_scroll = target.min(max_scroll);
-        }
-    }
-
-    display
 }
 
 fn handle_notification(
