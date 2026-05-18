@@ -80,6 +80,7 @@ theme = "synthwave"              # color theme (filename from ~/.config/muse/the
 default_tab = "queue"            # tab shown on launch: queue, library, search, lyrics
 ui_width = 120                   # max UI width in columns (min 40, or "auto")
 show_artwork = true              # display album art
+image_protocol = "auto"          # auto | kitty | sixel | iterm2 | halfblocks
 lyrics_enabled = true            # fetch synced lyrics from LRCLIB
 
 [spotify]

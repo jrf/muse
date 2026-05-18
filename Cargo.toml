@@ -10,7 +10,7 @@ spotify = ["dep:ureq", "dep:serde", "dep:serde_json", "dep:rand"]
 
 [dependencies]
 ratatui = "0.30"
-crossterm = "0.28"
+crossterm = "0.29"
 unicode-width = "0.2"
 ratatui-image = { version = "10", default-features = false, features = ["crossterm", "image-defaults"] }
 image = "0.25"

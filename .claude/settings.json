@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo check *)",
+      "Bash(gsutil ls *)",
+      "Bash(gsutil du *)",
+      "Bash(gcloud run services describe *)",
+      "Bash(gcloud scheduler jobs list *)"
+    ]
+  }
+}

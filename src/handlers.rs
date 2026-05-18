@@ -129,6 +129,7 @@ fn clear_filter(state: &mut AppState) {
 
 pub fn apply_fresh_state(
     state: &mut AppState,
+    artwork: &mut Option<StatefulProtocol>,
     fresh: &backend::FullState,
     picker: &Option<Arc<Picker>>,
     tx: &mpsc::Sender<AppEvent>,
@@ -198,7 +199,7 @@ pub fn apply_fresh_state(
         }
     } else if new_art_key.is_empty() {
         state.player.artwork_key.clear();
-        state.player.artwork = None;
+        *artwork = None;
     }
 }
 

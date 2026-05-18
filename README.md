@@ -54,6 +54,7 @@ theme = "synthwave"              # color theme (filename without .toml)
 default_tab = "queue"            # tab shown on launch: queue, library, search, lyrics
 ui_width = 120                   # max UI width in columns (min 40, or "auto")
 show_artwork = true              # display album art (requires sixel/kitty/iTerm2)
+image_protocol = "auto"          # auto | kitty | sixel | iterm2 | halfblocks
 lyrics_enabled = true            # fetch synced lyrics from LRCLIB
 
 [spotify]
@@ -138,9 +139,16 @@ Playback controls (`space`, `n`, `p`, `+`/`-`, `s`, `r`) work from any tab. In t
 
 ### Album Art
 
-Album art is displayed automatically in terminals that support sixel graphics (WezTerm, iTerm2, foot, Ghostty, etc.). Detection uses the DA1 terminal query. To override:
+Album art is displayed automatically in terminals that support sixel, kitty, or iTerm2 graphics (Kitty, Ghostty, WezTerm, iTerm2, foot, etc.). Detection uses the terminal's capability query.
 
+If auto-detection picks the wrong protocol for your terminal (or you want to force a specific one — e.g. nested tmux often blocks the query), set `image_protocol` in `config.toml`:
+
+```toml
+image_protocol = "kitty"      # force kitty graphics protocol
+image_protocol = "sixel"      # force sixel
+image_protocol = "iterm2"     # force iTerm2 inline images
+image_protocol = "halfblocks" # force fallback half-block rendering
+image_protocol = "auto"       # default — query the terminal
 ```
-MUSE_SIXEL=1 muse   # force enable
-MUSE_SIXEL=0 muse   # force disable
-```
+
+To disable artwork entirely, set `show_artwork = false`.

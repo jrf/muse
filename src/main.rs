@@ -21,7 +21,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::prelude::*;
-use ratatui_image::picker::Picker;
+use ratatui_image::picker::{Picker, ProtocolType};
 
 use backend::MusicBackend;
 use handlers::{apply_fresh_state, fetch_artwork, handle_key, handle_notification, AppEvent};
@@ -101,18 +101,36 @@ fn main() -> io::Result<()> {
     // Detect image protocol before entering raw mode (queries terminal).
     // On failure, fall back to halfblocks and surface the reason via the
     // error overlay so users can see why sixel/kitty wasn't selected.
+    //
+    // If the user has set image_protocol in config.toml, we still run
+    // from_query_stdio to learn the font size, then override the protocol
+    // type. This lets users force kitty in terminals where the graphics
+    // capability query doesn't make it through (e.g. nested tmux).
     let mut startup_error: Option<String> = None;
+    let configured_protocol = load_image_protocol();
     let picker = if show_artwork {
-        match Picker::from_query_stdio() {
-            Ok(p) => Some(p),
+        let mut p = match Picker::from_query_stdio() {
+            Ok(p) => p,
             Err(e) => {
                 startup_error = Some(format!(
                     "Terminal image protocol detection failed: {}\n\nFalling back to halfblocks.",
                     e
                 ));
-                Some(Picker::halfblocks())
+                Picker::halfblocks()
+            }
+        };
+        if let Some(name) = configured_protocol.as_deref() {
+            match parse_protocol_type(name) {
+                Some(pt) => p.set_protocol_type(pt),
+                None => {
+                    startup_error = Some(format!(
+                        "Unknown image_protocol \"{}\". Expected: auto, kitty, sixel, iterm2, or halfblocks.",
+                        name
+                    ));
+                }
             }
         }
+        Some(p)
     } else {
         None
     };
@@ -178,13 +196,19 @@ fn run_app(
     let refresh_interval = Duration::from_secs(2);
     let picker = picker.map(std::sync::Arc::new);
 
-    // Apply initial artwork BEFORE apply_fresh_state so it doesn't see a key
+    // Artwork lives outside AppState so ui::draw can hold a stable `&mut`
+    // to it across renders. The kitty graphics protocol relies on the
+    // StatefulProtocol's transmit-once state surviving frame-to-frame; if it
+    // sat inside AppState we'd have to take()/restore it every frame to
+    // satisfy the borrow checker, which broke kitty placeholder rendering.
+    let mut current_artwork: Option<ratatui_image::protocol::StatefulProtocol> = initial_artwork;
+
+    // Apply initial artwork key BEFORE apply_fresh_state so it doesn't see a key
     // change and spawn a redundant (possibly failing) background fetch.
-    state.player.artwork = initial_artwork;
     state.player.artwork_key = initial_artwork_key;
 
     // Apply the initial state fetched before raw mode
-    apply_fresh_state(&mut state, &initial_state, &picker, &tx, &backend);
+    apply_fresh_state(&mut state, &mut current_artwork, &initial_state, &picker, &tx, &backend);
     state.library.playlists = initial_playlists;
     let mut last_position_update = Instant::now();
 
@@ -277,7 +301,9 @@ fn run_app(
         } else {
             0.0
         };
-        terminal.draw(|f| ui::draw(f, &mut state, &current_theme, elapsed))?;
+        terminal.draw(|f| {
+            ui::draw(f, &mut state, &current_theme, &mut current_artwork, elapsed)
+        })?;
 
         // Wait for events (short timeout to keep rendering smooth)
         match rx.recv_timeout(Duration::from_millis(50)) {
@@ -385,7 +411,7 @@ fn run_app(
                 }
                 AppEvent::StateRefreshed(fresh) => {
                     let was_not_running = !state.player.music_running;
-                    apply_fresh_state(&mut state, &fresh, &picker, &tx, &backend);
+                    apply_fresh_state(&mut state, &mut current_artwork, &fresh, &picker, &tx, &backend);
                     last_position_update = Instant::now();
 
                     // When music service transitions to running, load playlists
@@ -428,7 +454,7 @@ fn run_app(
                 }
                 AppEvent::ArtworkLoaded(key, proto) => {
                     if state.player.artwork_key == key {
-                        state.player.artwork = Some(proto);
+                        current_artwork = Some(proto);
                     }
                 }
                 AppEvent::LastfmScrobbleResult(result) => {
@@ -545,6 +571,28 @@ fn load_config(state: &mut AppState, theme: &mut Theme) {
     }
     if let Some(enabled) = doc.get("lyrics_enabled").and_then(|v| v.as_bool()) {
         state.lyrics_enabled = enabled;
+    }
+}
+
+/// Read the `image_protocol` config value. Returns None if missing or set to "auto".
+fn load_image_protocol() -> Option<String> {
+    let doc = read_config()?;
+    let value = doc.get("image_protocol")?.as_str()?;
+    if value.eq_ignore_ascii_case("auto") || value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+/// Map a config string to a ProtocolType. Returns None for unknown values.
+fn parse_protocol_type(name: &str) -> Option<ProtocolType> {
+    match name.to_ascii_lowercase().as_str() {
+        "kitty" => Some(ProtocolType::Kitty),
+        "sixel" => Some(ProtocolType::Sixel),
+        "iterm2" | "iterm" => Some(ProtocolType::Iterm2),
+        "halfblocks" | "halfblock" => Some(ProtocolType::Halfblocks),
+        _ => None,
     }
 }
 

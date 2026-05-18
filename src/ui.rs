@@ -13,16 +13,22 @@ use crate::backend;
 use crate::state::{AppState, LibrarySubView, Tab};
 use crate::theme::Theme;
 
-/// Entry point. Takes &mut AppState so we can avoid cloning the whole struct
-/// for render-time interpolation: we temporarily move artwork out (so &state
-/// is freely borrowable), apply auto-scroll for synced lyrics, then render
-/// with the effective (interpolated) track position derived from `elapsed`.
-pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme, elapsed: f64) {
+/// Entry point. Takes `&mut AppState` so we can apply the lyric auto-scroll
+/// mutation in place, plus a separate `&mut` to the artwork (held in
+/// run_app's local — see the comment on `PlayerData::artwork_key`). Keeping
+/// artwork out of AppState lets us hold a stable mutable reference across
+/// renders, which the kitty graphics protocol needs for its transmit-once
+/// state to survive.
+pub fn draw(
+    f: &mut Frame,
+    state: &mut AppState,
+    theme: &Theme,
+    artwork: &mut Option<StatefulProtocol>,
+    elapsed: f64,
+) {
     let effective_position = effective_track_position(state, elapsed);
     apply_lyrics_autoscroll(state, effective_position);
-    let mut artwork = state.player.artwork.take();
-    do_draw(f, &*state, theme, &mut artwork, effective_position);
-    state.player.artwork = artwork;
+    do_draw(f, state, theme, artwork, effective_position);
 }
 
 fn effective_track_position(state: &AppState, elapsed: f64) -> Option<f64> {
@@ -169,8 +175,15 @@ fn draw_player_section(
         (None, area)
     };
 
-    // Render artwork if available
+    // Render artwork if available.
+    //
+    // We Clear the cells first, matching the ratatui-image `thread.rs`
+    // example. Without Clear, the parent Block's border render leaves cell
+    // styling in this area that interferes with the kitty graphics
+    // protocol's unicode placeholders — kitty won't replace placeholder
+    // cells that already have a foreground color from a previous widget.
     if let (Some(art_rect), Some(proto)) = (art_area, artwork.as_mut()) {
+        f.render_widget(Clear, art_rect);
         let image = StatefulImage::default();
         f.render_stateful_widget(image, art_rect, proto);
     }

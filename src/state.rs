@@ -4,8 +4,6 @@
 //! one concern at a time and so the surface area of any individual mutation
 //! is small. AppState owns one instance of each.
 
-use ratatui_image::protocol::StatefulProtocol;
-
 use crate::backend;
 use crate::theme::Theme;
 
@@ -68,7 +66,9 @@ pub enum LibrarySubView {
 
 pub struct PlayerData {
     pub track: Option<backend::Track>,
-    pub artwork: Option<StatefulProtocol>,
+    /// Identifier for the artwork currently held in run_app's local
+    /// `current_artwork`. Kept in state so handlers can detect when the
+    /// track changes and decide whether to refetch.
     pub artwork_key: String,
     pub playback: backend::PlayerState,
     pub volume: i32,
@@ -82,7 +82,6 @@ impl Default for PlayerData {
     fn default() -> Self {
         Self {
             track: None,
-            artwork: None,
             artwork_key: String::new(),
             playback: backend::PlayerState::Stopped,
             volume: 50,
