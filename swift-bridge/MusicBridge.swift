@@ -4,7 +4,14 @@ import Foundation
 // MARK: - Internal helpers
 
 private func makeCString(_ s: String) -> UnsafeMutablePointer<CChar> {
-    return strdup(s)!
+    if let p = strdup(s) {
+        return p
+    }
+    // strdup failed (extremely rare — OOM). Return a malloc'd empty string so
+    // music_free_string() can free it like any other returned pointer.
+    let fallback = malloc(1).assumingMemoryBound(to: CChar.self)
+    fallback.pointee = 0
+    return fallback
 }
 
 private func runAppleScript(_ script: String) -> String? {

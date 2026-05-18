@@ -117,6 +117,14 @@ unsafe fn take_c_string(ptr: *mut c_char) -> String {
     }
 }
 
+/// Build a CString or return None if the input contains an embedded null byte.
+/// A None return means callers should skip the FFI call entirely rather than
+/// silently passing an empty string to Swift (which would behave as "no playlist",
+/// "no query", etc.).
+fn try_cstring(s: &str) -> Option<CString> {
+    CString::new(s).ok()
+}
+
 /// Parse notification info from an opaque pointer, freeing the Swift object.
 fn parse_notification(ptr: *mut c_void) -> NotificationInfo {
     unsafe {
@@ -245,7 +253,7 @@ impl MusicBackend for AppleMusicBackend {
     }
 
     fn get_playlist_tracks(&self, name: &str) -> Vec<PlaylistTrack> {
-        let c_name = CString::new(name).unwrap_or_default();
+        let Some(c_name) = try_cstring(name) else { return Vec::new() };
         unsafe {
             let ptr = music_get_playlist_tracks_bulk(c_name.as_ptr());
             let count = music_playlist_tracks_count(ptr);
@@ -264,12 +272,12 @@ impl MusicBackend for AppleMusicBackend {
     }
 
     fn play_track_in_playlist(&self, playlist: &str, index: usize) {
-        let c_name = CString::new(playlist).unwrap_or_default();
+        let Some(c_name) = try_cstring(playlist) else { return };
         unsafe { music_play_track_in_playlist(c_name.as_ptr(), index as i32) }
     }
 
     fn search(&self, query: &str) -> Vec<SearchResult> {
-        let c_query = CString::new(query).unwrap_or_default();
+        let Some(c_query) = try_cstring(query) else { return Vec::new() };
         unsafe {
             let ptr = music_search(c_query.as_ptr());
             let count = music_search_count(ptr);
@@ -287,14 +295,14 @@ impl MusicBackend for AppleMusicBackend {
     }
 
     fn play_track(&self, name: &str, artist: &str) {
-        let c_name = CString::new(name).unwrap_or_default();
-        let c_artist = CString::new(artist).unwrap_or_default();
+        let Some(c_name) = try_cstring(name) else { return };
+        let Some(c_artist) = try_cstring(artist) else { return };
         unsafe { music_play_track(c_name.as_ptr(), c_artist.as_ptr()) }
     }
 
     fn get_lyrics(&self, track_name: &str, artist: &str) -> Option<LyricsResult> {
-        let c_name = CString::new(track_name).unwrap_or_default();
-        let c_artist = CString::new(artist).unwrap_or_default();
+        let c_name = try_cstring(track_name)?;
+        let c_artist = try_cstring(artist)?;
         unsafe {
             let ptr = music_get_lyrics(c_name.as_ptr(), c_artist.as_ptr());
             if ptr.is_null() {
@@ -332,23 +340,23 @@ impl MusicBackend for AppleMusicBackend {
     }
 
     fn reveal_artist(&self, artist: &str) {
-        let c = CString::new(artist).unwrap_or_default();
+        let Some(c) = try_cstring(artist) else { return };
         unsafe { music_reveal_artist(c.as_ptr()) }
     }
 
     fn reveal_album(&self, album: &str, artist: &str) {
-        let c_album = CString::new(album).unwrap_or_default();
-        let c_artist = CString::new(artist).unwrap_or_default();
+        let Some(c_album) = try_cstring(album) else { return };
+        let Some(c_artist) = try_cstring(artist) else { return };
         unsafe { music_reveal_album(c_album.as_ptr(), c_artist.as_ptr()) }
     }
 
     fn add_to_playlist(&self, playlist_name: &str) {
-        let c = CString::new(playlist_name).unwrap_or_default();
+        let Some(c) = try_cstring(playlist_name) else { return };
         unsafe { music_add_to_playlist(c.as_ptr()) }
     }
 
     fn remove_from_playlist(&self, playlist_name: &str, index: usize) {
-        let c = CString::new(playlist_name).unwrap_or_default();
+        let Some(c) = try_cstring(playlist_name) else { return };
         unsafe { music_remove_from_playlist(c.as_ptr(), index as i32) }
     }
 
