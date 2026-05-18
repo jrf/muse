@@ -121,8 +121,8 @@ pub fn filter_string_indices(items: &[String], query: &str) -> Vec<usize> {
 }
 
 fn clear_filter(state: &mut AppState) {
-    state.filter_query.clear();
-    state.filter_active = false;
+    state.filter.query.clear();
+    state.filter.active = false;
 }
 
 // MARK: - State application
@@ -134,28 +134,29 @@ pub fn apply_fresh_state(
     tx: &mpsc::Sender<AppEvent>,
     backend: &Arc<dyn MusicBackend>,
 ) {
-    let old_art_key = state.artwork_key.clone();
+    let old_art_key = state.player.artwork_key.clone();
 
     // Don't flip to "not running" if we were previously running — could be a
     // transient error during track transitions.  Only mark not running if we
     // also had no track before (i.e. we never connected).
-    if fresh.music_running || !state.music_running {
-        state.music_running = fresh.music_running;
+    if fresh.music_running || !state.player.music_running {
+        state.player.music_running = fresh.music_running;
     }
 
     if fresh.music_running {
-        state.volume = fresh.volume;
-        state.shuffle_enabled = fresh.shuffle_enabled;
-        state.repeat_mode = fresh.repeat_mode;
-        state.current_track_favorited = fresh.track_favorited;
+        state.player.volume = fresh.volume;
+        state.player.shuffle_enabled = fresh.shuffle_enabled;
+        state.player.repeat_mode = fresh.repeat_mode;
+        state.player.current_track_favorited = fresh.track_favorited;
         // Only update track/player_state with concrete data.
         // During transitions, keep showing the previous track.
         if let Some(ref track) = fresh.track {
             // If track just finished (same track, near end, no longer playing),
             // snap position to duration so the progress bar shows completion.
-            let was_playing = state.player_state == backend::PlayerState::Playing;
+            let was_playing = state.player.playback == backend::PlayerState::Playing;
             let is_no_longer_playing = fresh.player_state != backend::PlayerState::Playing;
             let is_same_track = state
+                .player
                 .track
                 .as_ref()
                 .map_or(false, |t| t.name == track.name && t.artist == track.artist);
@@ -166,11 +167,11 @@ pub fn apply_fresh_state(
                 updated_track.position = updated_track.duration;
             }
 
-            state.track = Some(updated_track);
-            state.player_state = fresh.player_state;
-        } else if state.track.is_none() {
+            state.player.track = Some(updated_track);
+            state.player.playback = fresh.player_state;
+        } else if state.player.track.is_none() {
             // No previous track either — show whatever state we got
-            state.player_state = fresh.player_state;
+            state.player.playback = fresh.player_state;
         }
         // If fresh has no track but we had one, keep the old track visible
         // and don't update player_state (it may transiently say "stopped")
@@ -183,7 +184,7 @@ pub fn apply_fresh_state(
         .map(|t| format!("{}\t{}", t.artist, t.album))
         .unwrap_or_default();
     if new_art_key != old_art_key && !new_art_key.is_empty() {
-        state.artwork_key = new_art_key.clone();
+        state.player.artwork_key = new_art_key.clone();
         // Keep old artwork visible until new one arrives — don't set to None
         if let Some(ref picker) = picker {
             let tx2 = tx.clone();
@@ -196,8 +197,8 @@ pub fn apply_fresh_state(
             });
         }
     } else if new_art_key.is_empty() {
-        state.artwork_key.clear();
-        state.artwork = None;
+        state.player.artwork_key.clear();
+        state.player.artwork = None;
     }
 }
 
@@ -209,22 +210,24 @@ pub fn handle_notification(
     backend: &Arc<dyn MusicBackend>,
 ) {
     match info.player_state.as_str() {
-        "Playing" => state.player_state = backend::PlayerState::Playing,
+        "Playing" => state.player.playback = backend::PlayerState::Playing,
         "Paused" | "Stopped" => {
-            let was_playing = state.player_state == backend::PlayerState::Playing;
+            let was_playing = state.player.playback == backend::PlayerState::Playing;
             let is_same_track = !info.name.is_empty()
                 && state
+                    .player
                     .track
                     .as_ref()
                     .map_or(false, |t| t.name == info.name && t.artist == info.artist);
             let near_end = state
+                .player
                 .track
                 .as_ref()
                 .map_or(false, |t| t.duration > 0.0 && (t.duration - t.position) < 5.0);
 
             // Snap position to duration so progress bar shows completion.
             if is_same_track && near_end {
-                if let Some(ref mut t) = state.track {
+                if let Some(ref mut t) = state.player.track {
                     t.position = t.duration;
                 }
             }
@@ -232,9 +235,9 @@ pub fn handle_notification(
             if info.player_state == "Stopped" && !info.name.is_empty() {
                 // Don't immediately mark stopped during transitions
             } else if info.player_state == "Stopped" {
-                state.player_state = backend::PlayerState::Stopped;
+                state.player.playback = backend::PlayerState::Stopped;
             } else {
-                state.player_state = backend::PlayerState::Paused;
+                state.player.playback = backend::PlayerState::Paused;
             }
 
             // Auto-advance for Apple Music when a track finishes naturally.
@@ -242,20 +245,20 @@ pub fn handle_notification(
             // updated above so a second notification won't fire again).
             // Spotify manages its own queue natively — no intervention needed.
             if was_playing && is_same_track && near_end && backend.needs_queue_advance() {
-                let playing_idx = state.queue_playing.unwrap_or(state.queue_selected);
-                if !state.queue_tracks.is_empty()
-                    && playing_idx + 1 < state.queue_tracks.len()
+                let playing_idx = state.queue.playing.unwrap_or(state.queue.selected);
+                if !state.queue.tracks.is_empty()
+                    && playing_idx + 1 < state.queue.tracks.len()
                 {
                     let next_idx = playing_idx + 1;
-                    state.queue_playing = Some(next_idx);
-                    playlist::save_queue_state(&state.queue_playlist_name, next_idx, state.queue_tracks.len());
-                    if state.queue_selected == playing_idx {
-                        state.queue_selected = next_idx;
+                    state.queue.playing = Some(next_idx);
+                    playlist::save_queue_state(&state.queue.playlist_name, next_idx, state.queue.tracks.len());
+                    if state.queue.selected == playing_idx {
+                        state.queue.selected = next_idx;
                     }
-                    if next_idx >= state.queue_scroll + PAGE_SIZE {
-                        state.queue_scroll = next_idx.saturating_sub(3);
+                    if next_idx >= state.queue.scroll + PAGE_SIZE {
+                        state.queue.scroll = next_idx.saturating_sub(3);
                     }
-                    let playlist = state.queue_playlist_name.clone();
+                    let playlist = state.queue.playlist_name.clone();
                     fire_and_refresh(backend, tx, move |b| {
                         b.play_track_in_playlist(&playlist, next_idx)
                     });
@@ -269,11 +272,12 @@ pub fn handle_notification(
 
     if !info.name.is_empty() {
         let is_new = state
+            .player
             .track
             .as_ref()
             .map_or(true, |t| t.name != info.name || t.artist != info.artist);
 
-        state.track = Some(backend::Track {
+        state.player.track = Some(backend::Track {
             name: info.name.clone(),
             artist: info.artist.clone(),
             album: info.album.clone(),
@@ -281,27 +285,27 @@ pub fn handle_notification(
             position: if is_new {
                 0.0
             } else {
-                state.track.as_ref().map_or(0.0, |t| t.position)
+                state.player.track.as_ref().map_or(0.0, |t| t.position)
             },
         });
 
         // Sync queue_playing if the new track matches a queue entry
         // (handles CLI next/prev while TUI is running).
-        if is_new && !state.queue_tracks.is_empty() {
+        if is_new && !state.queue.tracks.is_empty() {
             if let Some(pos) = playlist::sync_queue_selection(
-                &state.queue_tracks,
-                &state.queue_playlist_name,
+                &state.queue.tracks,
+                &state.queue.playlist_name,
                 &info.name,
                 &info.artist,
             ) {
-                state.queue_playing = Some(pos);
+                state.queue.playing = Some(pos);
             }
         }
 
         if is_new {
             let new_key = format!("{}\t{}", info.artist, info.album);
-            if new_key != state.artwork_key {
-                state.artwork_key = new_key.clone();
+            if new_key != state.player.artwork_key {
+                state.player.artwork_key = new_key.clone();
                 if let Some(ref picker) = picker {
                     let tx2 = tx.clone();
                     let picker = picker.clone();
@@ -316,7 +320,7 @@ pub fn handle_notification(
         }
     }
 
-    state.music_running = true;
+    state.player.music_running = true;
 }
 
 // MARK: - Key handling
@@ -330,35 +334,35 @@ pub fn handle_key(
     backend: &Arc<dyn MusicBackend>,
 ) -> bool {
     // Error overlay — any key dismisses
-    if state.error_message.is_some() {
-        state.error_message = None;
+    if state.overlays.error_message.is_some() {
+        state.overlays.error_message = None;
         return false;
     }
 
     // Help overlay
     if key.code == KeyCode::Char('?') {
-        state.show_help = !state.show_help;
+        state.overlays.show_help = !state.overlays.show_help;
         return false;
     }
-    if state.show_help {
-        state.show_help = false;
+    if state.overlays.show_help {
+        state.overlays.show_help = false;
         return false;
     }
 
     // Theme picker overlay
-    if state.show_theme_picker {
+    if state.theme.picker_visible {
         handle_theme_picker_key(key, state, theme);
         return false;
     }
 
     // Playlist picker
-    if state.show_playlist_picker {
+    if state.overlays.playlist_picker_visible {
         handle_playlist_picker_key(key, state, tx, backend);
         return false;
     }
 
-    let in_search = state.active_tab == Tab::Search && state.search_editing;
-    let in_filter = state.filter_active;
+    let in_search = state.active_tab == Tab::Search && state.search.editing;
+    let in_filter = state.filter.active;
     let text_input = in_search || in_filter;
 
     // Global keys
@@ -376,14 +380,14 @@ pub fn handle_key(
             return false;
         }
         KeyCode::Char('t') if !text_input => {
-            state.show_theme_picker = !state.show_theme_picker;
-            if state.show_theme_picker {
-                if let Some((idx, _)) = theme::find_theme(&state.theme_name, &state.themes) {
-                    state.theme_selected = idx;
+            state.theme.picker_visible = !state.theme.picker_visible;
+            if state.theme.picker_visible {
+                if let Some((idx, _)) = theme::find_theme(&state.theme.name, &state.theme.all) {
+                    state.theme.selected = idx;
                 } else {
-                    state.theme_selected = 0;
+                    state.theme.selected = 0;
                 }
-                state.theme_scroll = 0;
+                state.theme.scroll = 0;
             } else {
                 restore_saved_theme(state, theme);
             }
@@ -400,11 +404,11 @@ pub fn handle_key(
         }
         KeyCode::Char('/') if state.active_tab != Tab::Queue && state.active_tab != Tab::Library => {
             state.active_tab = Tab::Search;
-            state.search_editing = true;
+            state.search.editing = true;
             return false;
         }
         KeyCode::Char(' ') if !text_input => {
-            state.player_state = if state.player_state == backend::PlayerState::Playing {
+            state.player.playback = if state.player.playback == backend::PlayerState::Playing {
                 backend::PlayerState::Paused
             } else {
                 backend::PlayerState::Playing
@@ -421,26 +425,26 @@ pub fn handle_key(
             return false;
         }
         KeyCode::Char('+') | KeyCode::Char('=') => {
-            state.volume = (state.volume + 5).min(100);
-            let vol = state.volume;
+            state.player.volume = (state.player.volume + 5).min(100);
+            let vol = state.player.volume;
             let b = backend.clone();
             std::thread::spawn(move || b.set_volume(vol));
             return false;
         }
         KeyCode::Char('-') if !text_input => {
-            state.volume = (state.volume - 5).max(0);
-            let vol = state.volume;
+            state.player.volume = (state.player.volume - 5).max(0);
+            let vol = state.player.volume;
             let b = backend.clone();
             std::thread::spawn(move || b.set_volume(vol));
             return false;
         }
         KeyCode::Char('s') if !text_input => {
-            state.shuffle_enabled = !state.shuffle_enabled;
+            state.player.shuffle_enabled = !state.player.shuffle_enabled;
             fire_and_refresh(backend, tx, |b| b.toggle_shuffle());
             return false;
         }
         KeyCode::Char('r') if !text_input => {
-            state.repeat_mode = match state.repeat_mode {
+            state.player.repeat_mode = match state.player.repeat_mode {
                 backend::RepeatMode::Off => backend::RepeatMode::All,
                 backend::RepeatMode::All => backend::RepeatMode::One,
                 backend::RepeatMode::One => backend::RepeatMode::Off,
@@ -449,53 +453,53 @@ pub fn handle_key(
             return false;
         }
         KeyCode::Char('C') if !text_input => {
-            state.queue_tracks.clear();
-            state.queue_selected = 0;
-            state.queue_scroll = 0;
-            state.queue_playing = None;
-            state.queue_playlist_name.clear();
+            state.queue.tracks.clear();
+            state.queue.selected = 0;
+            state.queue.scroll = 0;
+            state.queue.playing = None;
+            state.queue.playlist_name.clear();
             playlist::clear_queue_state();
             return false;
         }
         KeyCode::Char('f') if !text_input && !key.modifiers.contains(KeyModifiers::CONTROL) => {
-            state.current_track_favorited = !state.current_track_favorited;
+            state.player.current_track_favorited = !state.player.current_track_favorited;
             fire_and_refresh(backend, tx, |b| b.toggle_favorite());
             return false;
         }
         KeyCode::Char('P') if !text_input => {
-            state.show_playlist_picker = !state.show_playlist_picker;
-            state.playlist_picker_selected = 0;
-            state.playlist_picker_scroll = 0;
+            state.overlays.playlist_picker_visible = !state.overlays.playlist_picker_visible;
+            state.overlays.playlist_picker_selected = 0;
+            state.overlays.playlist_picker_scroll = 0;
             return false;
         }
         KeyCode::Char('a') if !text_input => {
-            if let Some(artist) = state.track.as_ref().map(|t| t.artist.clone()) {
+            if let Some(artist) = state.player.track.as_ref().map(|t| t.artist.clone()) {
                 if !artist.is_empty() {
                     state.active_tab = Tab::Search;
-                    state.search_editing = false;
-                    state.search_query = artist;
-                    state.search_selected = 0;
-                    state.search_scroll = 0;
+                    state.search.editing = false;
+                    state.search.query = artist;
+                    state.search.selected = 0;
+                    state.search.scroll = 0;
                     perform_search(state, tx, backend);
                 }
             }
             return false;
         }
         KeyCode::Char('A') => {
-            if let Some(album) = state.track.as_ref().map(|t| t.album.clone()) {
+            if let Some(album) = state.player.track.as_ref().map(|t| t.album.clone()) {
                 if !album.is_empty() {
                     state.active_tab = Tab::Search;
-                    state.search_editing = false;
-                    state.search_query = album;
-                    state.search_selected = 0;
-                    state.search_scroll = 0;
+                    state.search.editing = false;
+                    state.search.query = album;
+                    state.search.selected = 0;
+                    state.search.scroll = 0;
                     perform_search(state, tx, backend);
                 }
             }
             return false;
         }
         KeyCode::Char('o') if !text_input => {
-            if let Some(artist) = state.track.as_ref().map(|t| t.artist.clone()) {
+            if let Some(artist) = state.player.track.as_ref().map(|t| t.artist.clone()) {
                 if !artist.is_empty() {
                     let b = backend.clone();
                     std::thread::spawn(move || b.reveal_artist(&artist));
@@ -504,7 +508,7 @@ pub fn handle_key(
             return false;
         }
         KeyCode::Char('O') if !text_input => {
-            if let Some(track) = state.track.clone() {
+            if let Some(track) = state.player.track.clone() {
                 if !track.album.is_empty() {
                     let b = backend.clone();
                     std::thread::spawn(move || {
@@ -534,96 +538,96 @@ fn handle_queue_key(
     tx: &mpsc::Sender<AppEvent>,
     backend: &Arc<dyn MusicBackend>,
 ) {
-    if state.filter_active {
+    if state.filter.active {
         match key.code {
             KeyCode::Esc => {
                 clear_filter(state);
                 return;
             }
             KeyCode::Backspace => {
-                state.filter_query.pop();
-                if state.filter_query.is_empty() {
-                    state.filter_active = false;
+                state.filter.query.pop();
+                if state.filter.query.is_empty() {
+                    state.filter.active = false;
                 }
-                state.queue_selected = 0;
-                state.queue_scroll = 0;
+                state.queue.selected = 0;
+                state.queue.scroll = 0;
                 return;
             }
             KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                state.filter_query.push(ch);
-                state.queue_selected = 0;
-                state.queue_scroll = 0;
+                state.filter.query.push(ch);
+                state.queue.selected = 0;
+                state.queue.scroll = 0;
                 return;
             }
             _ => {}
         }
     }
 
-    let filtered = filter_track_indices(&state.queue_tracks, &state.filter_query);
-    let has_filter = !state.filter_query.is_empty();
+    let filtered = filter_track_indices(&state.queue.tracks, &state.filter.query);
+    let has_filter = !state.filter.query.is_empty();
 
-    let nav_len = if has_filter { filtered.len() } else { state.queue_tracks.len() };
-    let vim_nav = !state.filter_active;
-    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, vim_nav), state.queue_selected, state.queue_scroll, nav_len) {
-        state.queue_selected = sel;
-        state.queue_scroll = scr;
+    let nav_len = if has_filter { filtered.len() } else { state.queue.tracks.len() };
+    let vim_nav = !state.filter.active;
+    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, vim_nav), state.queue.selected, state.queue.scroll, nav_len) {
+        state.queue.selected = sel;
+        state.queue.scroll = scr;
         return;
     }
 
     match key.code {
         KeyCode::Char('/') => {
-            state.filter_active = true;
-            state.filter_query.clear();
-            state.queue_selected = 0;
-            state.queue_scroll = 0;
+            state.filter.active = true;
+            state.filter.query.clear();
+            state.queue.selected = 0;
+            state.queue.scroll = 0;
         }
         KeyCode::Enter => {
             let real_idx = if has_filter {
-                filtered.get(state.queue_selected).copied()
-            } else if state.queue_selected < state.queue_tracks.len() {
-                Some(state.queue_selected)
+                filtered.get(state.queue.selected).copied()
+            } else if state.queue.selected < state.queue.tracks.len() {
+                Some(state.queue.selected)
             } else {
                 None
             };
             if let Some(idx) = real_idx {
-                state.queue_playing = Some(idx);
-                playlist::save_queue_state(&state.queue_playlist_name, idx, state.queue_tracks.len());
-                let playlist = state.queue_playlist_name.clone();
+                state.queue.playing = Some(idx);
+                playlist::save_queue_state(&state.queue.playlist_name, idx, state.queue.tracks.len());
+                let playlist = state.queue.playlist_name.clone();
                 fire_and_refresh(backend, tx, move |b| b.play_track_in_playlist(&playlist, idx));
                 clear_filter(state);
             }
         }
-        KeyCode::Char('d') | KeyCode::Char('x') if !state.filter_active => {
+        KeyCode::Char('d') | KeyCode::Char('x') if !state.filter.active => {
             let real_idx = if has_filter {
-                filtered.get(state.queue_selected).copied()
-            } else if state.queue_selected < state.queue_tracks.len() {
-                Some(state.queue_selected)
+                filtered.get(state.queue.selected).copied()
+            } else if state.queue.selected < state.queue.tracks.len() {
+                Some(state.queue.selected)
             } else {
                 None
             };
             if let Some(removed) = real_idx {
-                state.queue_tracks.remove(removed);
-                if state.queue_tracks.is_empty() {
-                    state.queue_selected = 0;
-                    state.queue_scroll = 0;
-                    state.queue_playing = None;
-                    state.queue_playlist_name.clear();
+                state.queue.tracks.remove(removed);
+                if state.queue.tracks.is_empty() {
+                    state.queue.selected = 0;
+                    state.queue.scroll = 0;
+                    state.queue.playing = None;
+                    state.queue.playlist_name.clear();
                     playlist::clear_queue_state();
                     clear_filter(state);
                 } else {
-                    let new_filtered = filter_track_indices(&state.queue_tracks, &state.filter_query);
-                    if state.queue_selected >= new_filtered.len() && !new_filtered.is_empty() {
-                        state.queue_selected = new_filtered.len() - 1;
+                    let new_filtered = filter_track_indices(&state.queue.tracks, &state.filter.query);
+                    if state.queue.selected >= new_filtered.len() && !new_filtered.is_empty() {
+                        state.queue.selected = new_filtered.len() - 1;
                     }
-                    if let Some(ref mut pi) = state.queue_playing {
+                    if let Some(ref mut pi) = state.queue.playing {
                         if removed < *pi {
                             *pi -= 1;
                         } else if removed == *pi {
-                            state.queue_playing = None;
+                            state.queue.playing = None;
                         }
                     }
-                    let persist_idx = state.queue_playing.unwrap_or(0);
-                    playlist::save_queue_state(&state.queue_playlist_name, persist_idx, state.queue_tracks.len());
+                    let persist_idx = state.queue.playing.unwrap_or(0);
+                    playlist::save_queue_state(&state.queue.playlist_name, persist_idx, state.queue.tracks.len());
                 }
             }
         }
@@ -640,39 +644,39 @@ fn handle_library_key(
     tx: &mpsc::Sender<AppEvent>,
     backend: &Arc<dyn MusicBackend>,
 ) {
-    if state.filter_active {
+    if state.filter.active {
         match key.code {
             KeyCode::Esc => {
                 clear_filter(state);
                 return;
             }
             KeyCode::Backspace => {
-                state.filter_query.pop();
-                if state.filter_query.is_empty() {
-                    state.filter_active = false;
+                state.filter.query.pop();
+                if state.filter.query.is_empty() {
+                    state.filter.active = false;
                 }
-                match &state.library_sub_view {
+                match &state.library.sub_view {
                     LibrarySubView::Playlists => {
-                        state.library_selected = 0;
-                        state.library_scroll = 0;
+                        state.library.selected = 0;
+                        state.library.scroll = 0;
                     }
                     LibrarySubView::Tracks(_) => {
-                        state.playlist_tracks_selected = 0;
-                        state.playlist_tracks_scroll = 0;
+                        state.library.tracks_selected = 0;
+                        state.library.tracks_scroll = 0;
                     }
                 }
                 return;
             }
             KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                state.filter_query.push(ch);
-                match &state.library_sub_view {
+                state.filter.query.push(ch);
+                match &state.library.sub_view {
                     LibrarySubView::Playlists => {
-                        state.library_selected = 0;
-                        state.library_scroll = 0;
+                        state.library.selected = 0;
+                        state.library.scroll = 0;
                     }
                     LibrarySubView::Tracks(_) => {
-                        state.playlist_tracks_selected = 0;
-                        state.playlist_tracks_scroll = 0;
+                        state.library.tracks_selected = 0;
+                        state.library.tracks_scroll = 0;
                     }
                 }
                 return;
@@ -681,39 +685,39 @@ fn handle_library_key(
         }
     }
 
-    let has_filter = !state.filter_query.is_empty();
+    let has_filter = !state.filter.query.is_empty();
 
-    match state.library_sub_view.clone() {
+    match state.library.sub_view.clone() {
         LibrarySubView::Playlists => {
-            let filtered = filter_string_indices(&state.playlists, &state.filter_query);
-            let nav_len = if has_filter { filtered.len() } else { state.playlists.len() };
-            let vim_nav = !state.filter_active;
-            if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, vim_nav), state.library_selected, state.library_scroll, nav_len) {
-                state.library_selected = sel;
-                state.library_scroll = scr;
+            let filtered = filter_string_indices(&state.library.playlists, &state.filter.query);
+            let nav_len = if has_filter { filtered.len() } else { state.library.playlists.len() };
+            let vim_nav = !state.filter.active;
+            if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, vim_nav), state.library.selected, state.library.scroll, nav_len) {
+                state.library.selected = sel;
+                state.library.scroll = scr;
                 return;
             }
             match key.code {
                 KeyCode::Char('/') => {
-                    state.filter_active = true;
-                    state.filter_query.clear();
-                    state.library_selected = 0;
-                    state.library_scroll = 0;
+                    state.filter.active = true;
+                    state.filter.query.clear();
+                    state.library.selected = 0;
+                    state.library.scroll = 0;
                 }
                 KeyCode::Enter => {
                     let real_idx = if has_filter {
-                        filtered.get(state.library_selected).copied()
-                    } else if state.library_selected < state.playlists.len() {
-                        Some(state.library_selected)
+                        filtered.get(state.library.selected).copied()
+                    } else if state.library.selected < state.library.playlists.len() {
+                        Some(state.library.selected)
                     } else {
                         None
                     };
                     if let Some(idx) = real_idx {
-                        let name = state.playlists[idx].clone();
-                        state.library_sub_view = LibrarySubView::Tracks(name.clone());
-                        state.playlist_tracks.clear();
-                        state.playlist_tracks_selected = 0;
-                        state.playlist_tracks_scroll = 0;
+                        let name = state.library.playlists[idx].clone();
+                        state.library.sub_view = LibrarySubView::Tracks(name.clone());
+                        state.library.tracks.clear();
+                        state.library.tracks_selected = 0;
+                        state.library.tracks_scroll = 0;
                         clear_filter(state);
                         let tx2 = tx.clone();
                         let b = backend.clone();
@@ -730,42 +734,42 @@ fn handle_library_key(
             }
         }
         LibrarySubView::Tracks(ref playlist_name) => {
-            let filtered = filter_track_indices(&state.playlist_tracks, &state.filter_query);
-            let nav_len = if has_filter { filtered.len() } else { state.playlist_tracks.len() };
-            let vim_nav = !state.filter_active;
-            if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, vim_nav), state.playlist_tracks_selected, state.playlist_tracks_scroll, nav_len) {
-                state.playlist_tracks_selected = sel;
-                state.playlist_tracks_scroll = scr;
+            let filtered = filter_track_indices(&state.library.tracks, &state.filter.query);
+            let nav_len = if has_filter { filtered.len() } else { state.library.tracks.len() };
+            let vim_nav = !state.filter.active;
+            if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, vim_nav), state.library.tracks_selected, state.library.tracks_scroll, nav_len) {
+                state.library.tracks_selected = sel;
+                state.library.tracks_scroll = scr;
                 return;
             }
             match key.code {
                 KeyCode::Char('/') => {
-                    state.filter_active = true;
-                    state.filter_query.clear();
-                    state.playlist_tracks_selected = 0;
-                    state.playlist_tracks_scroll = 0;
+                    state.filter.active = true;
+                    state.filter.query.clear();
+                    state.library.tracks_selected = 0;
+                    state.library.tracks_scroll = 0;
                 }
-                KeyCode::Backspace if !state.filter_active && !has_filter => {
+                KeyCode::Backspace if !state.filter.active && !has_filter => {
                     clear_filter(state);
-                    state.library_sub_view = LibrarySubView::Playlists;
+                    state.library.sub_view = LibrarySubView::Playlists;
                 }
                 KeyCode::Enter => {
                     let real_idx = if has_filter {
-                        filtered.get(state.playlist_tracks_selected).copied()
-                    } else if state.playlist_tracks_selected < state.playlist_tracks.len() {
-                        Some(state.playlist_tracks_selected)
+                        filtered.get(state.library.tracks_selected).copied()
+                    } else if state.library.tracks_selected < state.library.tracks.len() {
+                        Some(state.library.tracks_selected)
                     } else {
                         None
                     };
                     if let Some(idx) = real_idx {
-                        state.queue_tracks = state.playlist_tracks.clone();
-                        state.queue_playlist_name = playlist_name.clone();
-                        state.queue_selected = idx;
-                        state.queue_playing = Some(idx);
-                        if idx < state.queue_scroll || idx >= state.queue_scroll + PAGE_SIZE {
-                            state.queue_scroll = idx.saturating_sub(3);
+                        state.queue.tracks = state.library.tracks.clone();
+                        state.queue.playlist_name = playlist_name.clone();
+                        state.queue.selected = idx;
+                        state.queue.playing = Some(idx);
+                        if idx < state.queue.scroll || idx >= state.queue.scroll + PAGE_SIZE {
+                            state.queue.scroll = idx.saturating_sub(3);
                         }
-                        playlist::save_queue_state(playlist_name, idx, state.playlist_tracks.len());
+                        playlist::save_queue_state(playlist_name, idx, state.library.tracks.len());
                         let name = playlist_name.clone();
                         fire_and_refresh(backend, tx, move |b| {
                             b.play_track_in_playlist(&name, idx)
@@ -773,11 +777,11 @@ fn handle_library_key(
                         clear_filter(state);
                     }
                 }
-                KeyCode::Char('d') | KeyCode::Char('x') if !state.filter_active => {
+                KeyCode::Char('d') | KeyCode::Char('x') if !state.filter.active => {
                     let real_idx = if has_filter {
-                        filtered.get(state.playlist_tracks_selected).copied()
-                    } else if state.playlist_tracks_selected < state.playlist_tracks.len() {
-                        Some(state.playlist_tracks_selected)
+                        filtered.get(state.library.tracks_selected).copied()
+                    } else if state.library.tracks_selected < state.library.tracks.len() {
+                        Some(state.library.tracks_selected)
                     } else {
                         None
                     };
@@ -785,12 +789,12 @@ fn handle_library_key(
                         let name = playlist_name.clone();
                         let b = backend.clone();
                         std::thread::spawn(move || b.remove_from_playlist(&name, idx));
-                        state.playlist_tracks.remove(idx);
-                        let new_filtered = filter_track_indices(&state.playlist_tracks, &state.filter_query);
-                        if state.playlist_tracks_selected >= new_filtered.len()
+                        state.library.tracks.remove(idx);
+                        let new_filtered = filter_track_indices(&state.library.tracks, &state.filter.query);
+                        if state.library.tracks_selected >= new_filtered.len()
                             && !new_filtered.is_empty()
                         {
-                            state.playlist_tracks_selected = new_filtered.len() - 1;
+                            state.library.tracks_selected = new_filtered.len() - 1;
                         }
                     }
                 }
@@ -809,58 +813,58 @@ fn handle_search_key(
     tx: &mpsc::Sender<AppEvent>,
     backend: &Arc<dyn MusicBackend>,
 ) {
-    if state.search_editing {
+    if state.search.editing {
         match key.code {
             KeyCode::Esc => {
-                state.search_editing = false;
+                state.search.editing = false;
             }
             KeyCode::Enter => {
-                state.search_editing = false;
+                state.search.editing = false;
             }
             KeyCode::Backspace => {
-                if !state.search_query.is_empty() {
-                    state.search_query.pop();
+                if !state.search.query.is_empty() {
+                    state.search.query.pop();
                     perform_search(state, tx, backend);
                 } else {
-                    state.search_results.clear();
-                    state.search_selected = 0;
-                    state.search_scroll = 0;
+                    state.search.results.clear();
+                    state.search.selected = 0;
+                    state.search.scroll = 0;
                 }
             }
             KeyCode::Char(ch) => {
                 if !key.modifiers.contains(KeyModifiers::CONTROL) {
-                    state.search_query.push(ch);
-                    state.search_selected = 0;
-                    state.search_scroll = 0;
+                    state.search.query.push(ch);
+                    state.search.selected = 0;
+                    state.search.scroll = 0;
                     perform_search(state, tx, backend);
                 }
             }
             _ => {}
         }
     } else {
-        if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, true), state.search_selected, state.search_scroll, state.search_results.len()) {
-            state.search_selected = sel;
-            state.search_scroll = scr;
+        if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, true), state.search.selected, state.search.scroll, state.search.results.len()) {
+            state.search.selected = sel;
+            state.search.scroll = scr;
             return;
         }
         match key.code {
             KeyCode::Char('/') | KeyCode::Char('i') => {
-                state.search_editing = true;
+                state.search.editing = true;
             }
             KeyCode::Enter => {
-                if !state.search_results.is_empty()
-                    && state.search_selected < state.search_results.len()
+                if !state.search.results.is_empty()
+                    && state.search.selected < state.search.results.len()
                 {
-                    let result = state.search_results[state.search_selected].clone();
+                    let result = state.search.results[state.search.selected].clone();
                     fire_and_refresh(backend, tx, move |b| b.play_track(&result.name, &result.artist));
                 }
             }
             KeyCode::Backspace => {
-                state.search_query.clear();
-                state.search_results.clear();
-                state.search_selected = 0;
-                state.search_scroll = 0;
-                state.search_editing = true;
+                state.search.query.clear();
+                state.search.results.clear();
+                state.search.selected = 0;
+                state.search.scroll = 0;
+                state.search.editing = true;
             }
             _ => {}
         }
@@ -870,58 +874,58 @@ fn handle_search_key(
 fn handle_lyrics_key(key: KeyEvent, state: &mut AppState) {
     match normalize_nav_key(&key, true) {
         KeyCode::Up => {
-            if state.lyrics_scroll > 0 {
-                state.lyrics_scroll -= 1;
-                state.lyrics_manual_scroll = true;
+            if state.lyrics.scroll > 0 {
+                state.lyrics.scroll -= 1;
+                state.lyrics.manual_scroll = true;
             }
         }
         KeyCode::Down => {
-            state.lyrics_scroll += 1;
-            state.lyrics_manual_scroll = true;
+            state.lyrics.scroll += 1;
+            state.lyrics.manual_scroll = true;
         }
         KeyCode::Home => {
-            state.lyrics_scroll = 0;
-            state.lyrics_manual_scroll = true;
+            state.lyrics.scroll = 0;
+            state.lyrics.manual_scroll = true;
         }
         KeyCode::End => {
-            state.lyrics_scroll = usize::MAX / 2;
-            state.lyrics_manual_scroll = true;
+            state.lyrics.scroll = usize::MAX / 2;
+            state.lyrics.manual_scroll = true;
         }
         KeyCode::PageUp => {
-            state.lyrics_scroll = state.lyrics_scroll.saturating_sub(PAGE_SIZE);
-            state.lyrics_manual_scroll = true;
+            state.lyrics.scroll = state.lyrics.scroll.saturating_sub(PAGE_SIZE);
+            state.lyrics.manual_scroll = true;
         }
         KeyCode::PageDown => {
-            state.lyrics_scroll += PAGE_SIZE;
-            state.lyrics_manual_scroll = true;
+            state.lyrics.scroll += PAGE_SIZE;
+            state.lyrics.manual_scroll = true;
         }
         KeyCode::Char('0') => {
-            state.lyrics_manual_scroll = false;
+            state.lyrics.manual_scroll = false;
         }
         _ => {}
     }
 }
 
 fn handle_theme_picker_key(key: KeyEvent, state: &mut AppState, theme: &mut Theme) {
-    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, true), state.theme_selected, state.theme_scroll, state.themes.len()) {
-        state.theme_selected = sel;
-        state.theme_scroll = scr;
+    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, true), state.theme.selected, state.theme.scroll, state.theme.all.len()) {
+        state.theme.selected = sel;
+        state.theme.scroll = scr;
         preview_theme(state, theme);
         return;
     }
     match key.code {
         KeyCode::Enter => {
-            if state.theme_selected < state.themes.len() {
-                let (ref name, t) = state.themes[state.theme_selected];
-                state.theme_name = name.clone();
+            if state.theme.selected < state.theme.all.len() {
+                let (ref name, t) = state.theme.all[state.theme.selected];
+                state.theme.name = name.clone();
                 *theme = t;
-                save_theme(&state.theme_name);
-                state.show_theme_picker = false;
+                save_theme(&state.theme.name);
+                state.theme.picker_visible = false;
             }
         }
         KeyCode::Esc | KeyCode::Char('t') | KeyCode::Char('q') => {
             restore_saved_theme(state, theme);
-            state.show_theme_picker = false;
+            state.theme.picker_visible = false;
         }
         _ => {}
     }
@@ -933,24 +937,24 @@ fn handle_playlist_picker_key(
     _tx: &mpsc::Sender<AppEvent>,
     backend: &Arc<dyn MusicBackend>,
 ) {
-    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, true), state.playlist_picker_selected, state.playlist_picker_scroll, state.playlists.len()) {
-        state.playlist_picker_selected = sel;
-        state.playlist_picker_scroll = scr;
+    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, true), state.overlays.playlist_picker_selected, state.overlays.playlist_picker_scroll, state.library.playlists.len()) {
+        state.overlays.playlist_picker_selected = sel;
+        state.overlays.playlist_picker_scroll = scr;
         return;
     }
     match key.code {
         KeyCode::Enter => {
-            if !state.playlists.is_empty()
-                && state.playlist_picker_selected < state.playlists.len()
+            if !state.library.playlists.is_empty()
+                && state.overlays.playlist_picker_selected < state.library.playlists.len()
             {
-                let name = state.playlists[state.playlist_picker_selected].clone();
-                state.show_playlist_picker = false;
+                let name = state.library.playlists[state.overlays.playlist_picker_selected].clone();
+                state.overlays.playlist_picker_visible = false;
                 let b = backend.clone();
                 std::thread::spawn(move || b.add_to_playlist(&name));
             }
         }
         KeyCode::Esc | KeyCode::Backspace | KeyCode::Char('P') => {
-            state.show_playlist_picker = false;
+            state.overlays.playlist_picker_visible = false;
         }
         _ => {}
     }
@@ -959,13 +963,13 @@ fn handle_playlist_picker_key(
 // MARK: - Theme helpers
 
 fn preview_theme(state: &AppState, theme: &mut Theme) {
-    if state.theme_selected < state.themes.len() {
-        *theme = state.themes[state.theme_selected].1;
+    if state.theme.selected < state.theme.all.len() {
+        *theme = state.theme.all[state.theme.selected].1;
     }
 }
 
 fn restore_saved_theme(state: &AppState, theme: &mut Theme) {
-    if let Some((_, t)) = theme::find_theme(&state.theme_name, &state.themes) {
+    if let Some((_, t)) = theme::find_theme(&state.theme.name, &state.theme.all) {
         *theme = t;
     }
 }
@@ -977,7 +981,7 @@ fn perform_search(
     tx: &mpsc::Sender<AppEvent>,
     backend: &Arc<dyn MusicBackend>,
 ) {
-    let query = state.search_query.clone();
+    let query = state.search.query.clone();
     if query.len() < 2 {
         return;
     }

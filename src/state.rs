@@ -1,4 +1,8 @@
-//! Application state — mirrors the Swift AppState but in idiomatic Rust.
+//! Application state.
+//!
+//! Decomposed into per-feature sub-structs so handlers can be reasoned about
+//! one concern at a time and so the surface area of any individual mutation
+//! is small. AppState owns one instance of each.
 
 use ratatui_image::protocol::StatefulProtocol;
 
@@ -60,82 +64,160 @@ pub enum LibrarySubView {
     Tracks(String),
 }
 
-pub struct AppState {
-    // Config
-    pub ui_width: u16,
-    pub show_artwork: bool,
-    pub lyrics_enabled: bool,
+// MARK: - Sub-state structs
 
-    // Player
+pub struct PlayerData {
     pub track: Option<backend::Track>,
     pub artwork: Option<StatefulProtocol>,
     pub artwork_key: String,
-    pub player_state: backend::PlayerState,
+    pub playback: backend::PlayerState,
     pub volume: i32,
     pub shuffle_enabled: bool,
     pub repeat_mode: backend::RepeatMode,
     pub music_running: bool,
-
-    // Tabs
-    pub active_tab: Tab,
-
-    // Queue
-    pub queue_tracks: Vec<backend::PlaylistTrack>,
-    pub queue_selected: usize,
-    pub queue_scroll: usize,
-    pub queue_playing: Option<usize>, // index of the currently playing track (separate from cursor)
-    pub queue_playlist_name: String,
-
-    // Library
-    pub playlists: Vec<String>,
-    pub library_sub_view: LibrarySubView,
-    pub library_selected: usize,
-    pub library_scroll: usize,
-    pub playlist_tracks: Vec<backend::PlaylistTrack>,
-    pub playlist_tracks_selected: usize,
-    pub playlist_tracks_scroll: usize,
-
-    // Search
-    pub search_query: String,
-    pub search_results: Vec<backend::SearchResult>,
-    pub search_selected: usize,
-    pub search_scroll: usize,
-    pub search_editing: bool,
-
-    // Lyrics
-    pub lyrics_lines: Vec<backend::LyricsLine>,
-    pub lyrics_synced: bool,
-    pub lyrics_scroll: usize,
-    pub lyrics_manual_scroll: bool,
-    pub lyrics_track_key: String,
-
-    // Themes
-    pub themes: Vec<(String, Theme)>,
-    pub theme_name: String,
-    pub theme_selected: usize,
-    pub theme_scroll: usize,
-    pub show_theme_picker: bool,
-
-    // Help overlay
-    pub show_help: bool,
-
-    // Favorite
     pub current_track_favorited: bool,
+}
 
-    // Playlist picker overlay
-    pub show_playlist_picker: bool,
+impl Default for PlayerData {
+    fn default() -> Self {
+        Self {
+            track: None,
+            artwork: None,
+            artwork_key: String::new(),
+            playback: backend::PlayerState::Stopped,
+            volume: 50,
+            shuffle_enabled: false,
+            repeat_mode: backend::RepeatMode::Off,
+            music_running: true,
+            current_track_favorited: false,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct QueueData {
+    pub tracks: Vec<backend::PlaylistTrack>,
+    pub selected: usize,
+    pub scroll: usize,
+    /// Index of the currently-playing track (distinct from the user's cursor).
+    pub playing: Option<usize>,
+    pub playlist_name: String,
+}
+
+pub struct LibraryData {
+    pub playlists: Vec<String>,
+    pub sub_view: LibrarySubView,
+    pub selected: usize,
+    pub scroll: usize,
+    pub tracks: Vec<backend::PlaylistTrack>,
+    pub tracks_selected: usize,
+    pub tracks_scroll: usize,
+}
+
+impl Default for LibraryData {
+    fn default() -> Self {
+        Self {
+            playlists: Vec::new(),
+            sub_view: LibrarySubView::Playlists,
+            selected: 0,
+            scroll: 0,
+            tracks: Vec::new(),
+            tracks_selected: 0,
+            tracks_scroll: 0,
+        }
+    }
+}
+
+pub struct SearchData {
+    pub query: String,
+    pub results: Vec<backend::SearchResult>,
+    pub selected: usize,
+    pub scroll: usize,
+    pub editing: bool,
+}
+
+impl Default for SearchData {
+    fn default() -> Self {
+        Self {
+            query: String::new(),
+            results: Vec::new(),
+            selected: 0,
+            scroll: 0,
+            editing: true,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct LyricsData {
+    pub lines: Vec<backend::LyricsLine>,
+    pub synced: bool,
+    pub scroll: usize,
+    pub manual_scroll: bool,
+    pub track_key: String,
+}
+
+pub struct ThemeData {
+    pub all: Vec<(String, Theme)>,
+    pub name: String,
+    pub selected: usize,
+    pub scroll: usize,
+    pub picker_visible: bool,
+}
+
+impl Default for ThemeData {
+    fn default() -> Self {
+        Self {
+            all: Vec::new(),
+            name: "synthwave".to_string(),
+            selected: 0,
+            scroll: 0,
+            picker_visible: false,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct OverlayData {
+    pub show_help: bool,
+    pub playlist_picker_visible: bool,
     pub playlist_picker_selected: usize,
     pub playlist_picker_scroll: usize,
-
-    // Last.fm
-    pub lastfm_status: String,
-
-    // Filter (shared across Queue and Library)
-    pub filter_query: String,
-    pub filter_active: bool,
-
-    // Transient error overlay (dismissed on any key)
+    /// Transient error overlay; dismissed on any key.
     pub error_message: Option<String>,
+}
+
+#[derive(Default)]
+pub struct FilterData {
+    /// Substring filter (shared across Queue and Library tabs).
+    pub query: String,
+    /// True while the user is actively typing into the filter input.
+    pub active: bool,
+}
+
+// MARK: - AppState
+
+pub struct AppState {
+    // Config (from ~/.config/muse/config.toml)
+    pub ui_width: u16,
+    pub show_artwork: bool,
+    pub lyrics_enabled: bool,
+
+    // Active UI
+    pub active_tab: Tab,
+
+    // Per-concern sub-states
+    pub player: PlayerData,
+    pub queue: QueueData,
+    pub library: LibraryData,
+    pub search: SearchData,
+    pub lyrics: LyricsData,
+    pub theme: ThemeData,
+    pub overlays: OverlayData,
+    pub filter: FilterData,
+
+    // Misc
+    pub lastfm_status: String,
 }
 
 impl Default for AppState {
@@ -144,51 +226,16 @@ impl Default for AppState {
             ui_width: 120,
             show_artwork: true,
             lyrics_enabled: true,
-            track: None,
-            artwork: None,
-            artwork_key: String::new(),
-            player_state: backend::PlayerState::Stopped,
-            volume: 50,
-            shuffle_enabled: false,
-            repeat_mode: backend::RepeatMode::Off,
-            music_running: true,
             active_tab: Tab::Queue,
-            queue_tracks: Vec::new(),
-            queue_selected: 0,
-            queue_scroll: 0,
-            queue_playing: None,
-            queue_playlist_name: String::new(),
-            playlists: Vec::new(),
-            library_sub_view: LibrarySubView::Playlists,
-            library_selected: 0,
-            library_scroll: 0,
-            playlist_tracks: Vec::new(),
-            playlist_tracks_selected: 0,
-            playlist_tracks_scroll: 0,
-            search_query: String::new(),
-            search_results: Vec::new(),
-            search_selected: 0,
-            search_scroll: 0,
-            search_editing: true,
-            lyrics_lines: Vec::new(),
-            lyrics_synced: false,
-            lyrics_scroll: 0,
-            lyrics_manual_scroll: false,
-            lyrics_track_key: String::new(),
-            themes: Vec::new(),
-            theme_name: "synthwave".to_string(),
-            theme_selected: 0,
-            theme_scroll: 0,
-            show_theme_picker: false,
-            show_help: false,
-            current_track_favorited: false,
-            show_playlist_picker: false,
-            playlist_picker_selected: 0,
-            playlist_picker_scroll: 0,
+            player: PlayerData::default(),
+            queue: QueueData::default(),
+            library: LibraryData::default(),
+            search: SearchData::default(),
+            lyrics: LyricsData::default(),
+            theme: ThemeData::default(),
+            overlays: OverlayData::default(),
+            filter: FilterData::default(),
             lastfm_status: String::new(),
-            filter_query: String::new(),
-            filter_active: false,
-            error_message: None,
         }
     }
 }

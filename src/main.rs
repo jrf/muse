@@ -171,8 +171,8 @@ fn run_app(
     let (tx, rx) = mpsc::channel::<AppEvent>();
 
     let mut state = AppState::default();
-    state.themes = theme::load_themes();
-    state.error_message = startup_error;
+    state.theme.all = theme::load_themes();
+    state.overlays.error_message = startup_error;
     let mut current_theme = theme::default_theme();
     let mut last_refresh = Instant::now();
     let refresh_interval = Duration::from_secs(2);
@@ -180,12 +180,12 @@ fn run_app(
 
     // Apply initial artwork BEFORE apply_fresh_state so it doesn't see a key
     // change and spawn a redundant (possibly failing) background fetch.
-    state.artwork = initial_artwork;
-    state.artwork_key = initial_artwork_key;
+    state.player.artwork = initial_artwork;
+    state.player.artwork_key = initial_artwork_key;
 
     // Apply the initial state fetched before raw mode
     apply_fresh_state(&mut state, &initial_state, &picker, &tx, &backend);
-    state.playlists = initial_playlists;
+    state.library.playlists = initial_playlists;
     let mut last_position_update = Instant::now();
 
     // Restore queue from persisted state (playlist name + index)
@@ -193,12 +193,12 @@ fn run_app(
         let tracks = backend.get_playlist_tracks(&playlist_name);
         if !tracks.is_empty() {
             let sel = selected.min(tracks.len() - 1);
-            state.queue_playlist_name = playlist_name;
-            state.queue_tracks = tracks;
-            state.queue_selected = sel;
-            state.queue_playing = Some(sel);
+            state.queue.playlist_name = playlist_name;
+            state.queue.tracks = tracks;
+            state.queue.selected = sel;
+            state.queue.playing = Some(sel);
             if sel >= PAGE_SIZE {
-                state.queue_scroll = sel.saturating_sub(3);
+                state.queue.scroll = sel.saturating_sub(3);
             }
         }
     }
@@ -272,7 +272,7 @@ fn run_app(
         // Render — pass elapsed-since-last-position-update to ui::draw so it
         // can interpolate the displayed track position without us cloning
         // AppState every tick.
-        let elapsed = if state.player_state == backend::PlayerState::Playing {
+        let elapsed = if state.player.playback == backend::PlayerState::Playing {
             last_position_update.elapsed().as_secs_f64()
         } else {
             0.0
@@ -368,10 +368,10 @@ fn run_app(
                     // Fetch lyrics for new track if needed
                     if state.lyrics_enabled && !info.name.is_empty() {
                         let lyrics_key = format!("{}\t{}", info.name, info.artist);
-                        if lyrics_key != state.lyrics_track_key {
-                            state.lyrics_track_key = lyrics_key.clone();
-                            state.lyrics_scroll = 0;
-                            state.lyrics_manual_scroll = false;
+                        if lyrics_key != state.lyrics.track_key {
+                            state.lyrics.track_key = lyrics_key.clone();
+                            state.lyrics.scroll = 0;
+                            state.lyrics.manual_scroll = false;
                             let tx2 = tx.clone();
                             let name = info.name.clone();
                             let artist = info.artist.clone();
@@ -384,12 +384,12 @@ fn run_app(
                     }
                 }
                 AppEvent::StateRefreshed(fresh) => {
-                    let was_not_running = !state.music_running;
+                    let was_not_running = !state.player.music_running;
                     apply_fresh_state(&mut state, &fresh, &picker, &tx, &backend);
                     last_position_update = Instant::now();
 
                     // When music service transitions to running, load playlists
-                    if was_not_running && state.music_running && state.playlists.is_empty() {
+                    if was_not_running && state.player.music_running && state.library.playlists.is_empty() {
                         let tx2 = tx.clone();
                         let b = backend.clone();
                         std::thread::spawn(move || {
@@ -399,36 +399,36 @@ fn run_app(
                     }
                 }
                 AppEvent::PlaylistsLoaded(playlists) => {
-                    state.playlists = playlists;
+                    state.library.playlists = playlists;
                 }
                 AppEvent::PlaylistTracksLoaded(playlist_name, tracks) => {
-                    if let LibrarySubView::Tracks(ref current) = state.library_sub_view {
+                    if let LibrarySubView::Tracks(ref current) = state.library.sub_view {
                         if *current == playlist_name {
-                            state.playlist_tracks = tracks;
+                            state.library.tracks = tracks;
                         }
                     }
                 }
                 AppEvent::SearchResults(query, results) => {
-                    if state.search_query == query {
-                        state.search_results = results;
+                    if state.search.query == query {
+                        state.search.results = results;
                     }
                 }
                 AppEvent::LyricsLoaded(key, result) => {
-                    if state.lyrics_track_key == key {
+                    if state.lyrics.track_key == key {
                         if let Some(r) = result {
-                            state.lyrics_lines = r.lines;
-                            state.lyrics_synced = r.synced;
+                            state.lyrics.lines = r.lines;
+                            state.lyrics.synced = r.synced;
                         } else {
-                            state.lyrics_lines.clear();
-                            state.lyrics_synced = false;
+                            state.lyrics.lines.clear();
+                            state.lyrics.synced = false;
                         }
-                        state.lyrics_scroll = 0;
-                        state.lyrics_manual_scroll = false;
+                        state.lyrics.scroll = 0;
+                        state.lyrics.manual_scroll = false;
                     }
                 }
                 AppEvent::ArtworkLoaded(key, proto) => {
-                    if state.artwork_key == key {
-                        state.artwork = Some(proto);
+                    if state.player.artwork_key == key {
+                        state.player.artwork = Some(proto);
                     }
                 }
                 AppEvent::LastfmScrobbleResult(result) => {
@@ -522,9 +522,9 @@ fn dirs_or_home() -> std::path::PathBuf {
 fn load_config(state: &mut AppState, theme: &mut Theme) {
     let Some(doc) = read_config() else { return };
     if let Some(name) = doc.get("theme").and_then(|v| v.as_str()) {
-        if let Some((idx, t)) = theme::find_theme(name, &state.themes) {
-            state.theme_name = name.to_string();
-            state.theme_selected = idx;
+        if let Some((idx, t)) = theme::find_theme(name, &state.theme.all) {
+            state.theme.name = name.to_string();
+            state.theme.selected = idx;
             *theme = t;
         }
     }

@@ -47,9 +47,10 @@ Single file exporting ~40 `@_cdecl` functions. Controls Music.app via AppleScrip
 
 ### Other Modules
 
-- **`main.rs`** — Event loop with `mpsc` channel. Spawns background threads for expensive operations. `interpolated_state()` smooths playback position between refreshes. Backend selection via config. CLI subcommands (`muse next`, `muse prev`, etc.).
-- **`ui.rs`** — Ratatui rendering. Centered 120-column layout with player section, tab bar, and tab content area (Queue, Library, Search, Lyrics, Themes).
-- **`state.rs`** — `AppState` struct with all UI state: selected indices, scroll positions, loaded data, active tab.
+- **`main.rs`** — Entry point, terminal setup, `run_app()` event loop with `mpsc` channel, CLI subcommands (`muse next`, `muse prev`, etc.), and config loading. Position interpolation is computed at render time inside `ui::draw` using an `elapsed` parameter (no full AppState clone).
+- **`handlers.rs`** — Event handlers (key handlers per tab, `apply_fresh_state`, `handle_notification`), the `AppEvent` enum, navigation/filter helpers, and the `fire_and_refresh` / `perform_search` thread spawners.
+- **`ui.rs`** — Ratatui rendering. Takes `&mut AppState` so it can temporarily move `player.artwork` out, apply lyric auto-scroll, and render without cloning. Centered 120-column layout with player section, tab bar, and tab content area (Queue, Library, Search, Lyrics, Themes).
+- **`state.rs`** — `AppState` decomposed into per-concern sub-structs: `PlayerData`, `QueueData`, `LibraryData`, `SearchData`, `LyricsData`, `ThemeData`, `OverlayData`, `FilterData`. Top-level fields are config (`ui_width`, `show_artwork`, `lyrics_enabled`), active tab, and `lastfm_status`.
 - **`playlist.rs`** — Apple Music-specific queue state persistence and CLI playlist-aware next/prev. Not used by Spotify backend.
 - **`lastfm.rs`** — Last.fm scrobbling via external `muse-scrobble` CLI. `ScrobbleTracker` tracks play timing in-process (50% or 4min threshold).
 - **`theme.rs`** — Theme loading from TOML config files (`~/.config/muse/themes/*.toml`). Default themes are embedded via `include_str!` from `themes/` and written to disk on first run. Supports 256-color indexed palette and hex RGB colors.
@@ -63,9 +64,11 @@ The original pure-Swift TUI (direct ANSI rendering). Not used when building with
 - **Backend abstraction**: `Arc<dyn MusicBackend>` passed through `run_app` → handlers. All `bridge::*` calls replaced with `backend.*` method calls. Background threads clone the `Arc`.
 - **Async event model**: Background threads send results via `AppEvent` enum through `mpsc::Sender`. The main loop renders on each event or 50ms timeout.
 - **Notification bridge**: Backend sends `NotificationInfo` through a channel. Apple Music: C callback from `NSDistributedNotificationCenter`. Spotify: polling thread every 2s.
-- **Position interpolation**: Base position from periodic polls; `interpolated_state()` adds elapsed wall-clock time for smooth progress display.
+- **Position interpolation**: Base position from periodic polls; `ui::draw` adds elapsed wall-clock time to `track.position` at render time so playback progresses smoothly between 2-second refreshes. No state clone.
 - **Transient resilience**: `apply_fresh_state()` keeps the previous track visible during backend failures that occur during track transitions.
-- **`fire_and_refresh`**: Spawns a thread to execute an action, waits 500ms for the service to update, then fetches fresh state. Used for all playback control actions.
+- **`fire_and_refresh`**: Spawns a thread to execute an action, then polls `fetch_state` at 500ms / 1300ms / 2100ms. Multiple polls absorb Web API lag (Spotify); each refresh is applied idempotently.
+- **Shutdown signal**: `Arc<AtomicBool>` shared with backend polling threads and the input/tick threads. Flipped before `run_app` returns so polling loops exit promptly rather than sleeping out a 2-second tick.
+- **Error overlay**: Runtime failures (e.g. terminal image-protocol detection) are surfaced via `overlays.error_message` as a centered TUI overlay dismissible by any key, instead of `eprintln!` corrupting the alternate screen.
 
 ## Configuration
 

@@ -20,14 +20,14 @@ use crate::theme::Theme;
 pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme, elapsed: f64) {
     let effective_position = effective_track_position(state, elapsed);
     apply_lyrics_autoscroll(state, effective_position);
-    let mut artwork = state.artwork.take();
+    let mut artwork = state.player.artwork.take();
     do_draw(f, &*state, theme, &mut artwork, effective_position);
-    state.artwork = artwork;
+    state.player.artwork = artwork;
 }
 
 fn effective_track_position(state: &AppState, elapsed: f64) -> Option<f64> {
-    let track = state.track.as_ref()?;
-    if state.player_state == backend::PlayerState::Playing {
+    let track = state.player.track.as_ref()?;
+    if state.player.playback == backend::PlayerState::Playing {
         Some((track.position + elapsed).min(track.duration))
     } else {
         Some(track.position)
@@ -35,12 +35,13 @@ fn effective_track_position(state: &AppState, elapsed: f64) -> Option<f64> {
 }
 
 fn apply_lyrics_autoscroll(state: &mut AppState, effective_position: Option<f64>) {
-    if !state.lyrics_synced || state.lyrics_manual_scroll {
+    if !state.lyrics.synced || state.lyrics.manual_scroll {
         return;
     }
     let Some(pos) = effective_position else { return };
     let current_idx = state
-        .lyrics_lines
+        .lyrics
+        .lines
         .iter()
         .enumerate()
         .rev()
@@ -49,8 +50,8 @@ fn apply_lyrics_autoscroll(state: &mut AppState, effective_position: Option<f64>
     let Some(idx) = current_idx else { return };
     let max_rows = 20; // approximate; corrected by actual render area
     let target = idx.saturating_sub(max_rows / 2);
-    let max_scroll = state.lyrics_lines.len().saturating_sub(max_rows);
-    state.lyrics_scroll = target.min(max_scroll);
+    let max_scroll = state.lyrics.lines.len().saturating_sub(max_rows);
+    state.lyrics.scroll = target.min(max_scroll);
 }
 
 fn do_draw(
@@ -108,9 +109,9 @@ fn do_draw(
 }
 
 fn player_height(state: &AppState) -> u16 {
-    if !state.music_running {
+    if !state.player.music_running {
         3
-    } else if state.track.is_some() {
+    } else if state.player.track.is_some() {
         10
     } else {
         2
@@ -125,7 +126,7 @@ fn draw_player_section(
     artwork: &mut Option<StatefulProtocol>,
     effective_position: Option<f64>,
 ) {
-    if !state.music_running {
+    if !state.player.music_running {
         let lines = vec![
             Line::from(Span::styled(
                 "Music.app is not running",
@@ -141,7 +142,7 @@ fn draw_player_section(
         return;
     }
 
-    let Some(track) = &state.track else {
+    let Some(track) = &state.player.track else {
         let p = Paragraph::new(Span::styled(
             "No track playing",
             Style::default().fg(theme.text_dim),
@@ -188,7 +189,7 @@ fn draw_player_section(
     .split(text_area);
 
     // Track name
-    let fav = if state.current_track_favorited {
+    let fav = if state.player.current_track_favorited {
         " ♥"
     } else {
         ""
@@ -250,13 +251,13 @@ fn draw_player_section(
     f.render_widget(Paragraph::new(Line::from(spans)), rows[4]);
 
     // Controls — status-only (keybindings shown in help line)
-    let shuffle_str = if state.shuffle_enabled {
+    let shuffle_str = if state.player.shuffle_enabled {
         "⤮ on "
     } else {
         "⤮ off"
     };
-    let repeat_str = format!("⟳ {}", state.repeat_mode.label());
-    let vol_str = format!("Vol: {}%", state.volume);
+    let repeat_str = format!("⟳ {}", state.player.repeat_mode.label());
+    let vol_str = format!("Vol: {}%", state.player.volume);
     let controls = format!("{}  {}  {}", shuffle_str, repeat_str, vol_str);
     f.render_widget(
         Paragraph::new(Span::styled(controls, Style::default().fg(theme.text)))
@@ -305,11 +306,11 @@ fn draw_tab_content(
     theme: &Theme,
     effective_position: Option<f64>,
 ) {
-    if state.show_help {
+    if state.overlays.show_help {
         draw_help_overlay(f, area, theme);
         return;
     }
-    if state.show_playlist_picker {
+    if state.overlays.playlist_picker_visible {
         draw_playlist_picker(f, area, state, theme);
         return;
     }
@@ -319,10 +320,10 @@ fn draw_tab_content(
         Tab::Search => draw_search(f, area, state, theme),
         Tab::Lyrics => draw_lyrics(f, area, state, theme, effective_position),
     }
-    if state.show_theme_picker {
+    if state.theme.picker_visible {
         draw_theme_picker(f, area, state, theme);
     }
-    if let Some(msg) = &state.error_message {
+    if let Some(msg) = &state.overlays.error_message {
         draw_error_overlay(f, area, msg, theme);
     }
 }
@@ -376,10 +377,10 @@ fn draw_error_overlay(f: &mut Frame, area: Rect, msg: &str, theme: &Theme) {
 fn draw_filter_bar(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     let line = Line::from(vec![
         Span::styled("/ ", Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)),
-        if state.filter_active {
-            Span::styled(format!("{}▏", state.filter_query), Style::default().fg(theme.accent))
+        if state.filter.active {
+            Span::styled(format!("{}▏", state.filter.query), Style::default().fg(theme.accent))
         } else {
-            Span::styled(state.filter_query.clone(), Style::default().fg(theme.accent))
+            Span::styled(state.filter.query.clone(), Style::default().fg(theme.accent))
         },
         Span::styled("  Esc to clear", Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM)),
     ]);
@@ -387,7 +388,7 @@ fn draw_filter_bar(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
 }
 
 fn draw_queue(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
-    if state.queue_tracks.is_empty() {
+    if state.queue.tracks.is_empty() {
         f.render_widget(
             Paragraph::new(Span::styled(
                 "No queue — play a playlist to fill",
@@ -399,7 +400,7 @@ fn draw_queue(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
         return;
     }
 
-    let has_filter = !state.filter_query.is_empty() || state.filter_active;
+    let has_filter = !state.filter.query.is_empty() || state.filter.active;
     let (filter_area, list_area) = if has_filter {
         let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
         draw_filter_bar(f, rows[0], state, theme);
@@ -410,14 +411,14 @@ fn draw_queue(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     let _ = filter_area;
 
     // Build filtered indices
-    let filtered: Vec<usize> = if !state.filter_query.is_empty() {
-        let q = state.filter_query.to_lowercase();
-        state.queue_tracks.iter().enumerate()
+    let filtered: Vec<usize> = if !state.filter.query.is_empty() {
+        let q = state.filter.query.to_lowercase();
+        state.queue.tracks.iter().enumerate()
             .filter(|(_, t)| t.name.to_lowercase().contains(&q) || t.artist.to_lowercase().contains(&q))
             .map(|(i, _)| i)
             .collect()
     } else {
-        (0..state.queue_tracks.len()).collect()
+        (0..state.queue.tracks.len()).collect()
     };
 
     if filtered.is_empty() && has_filter {
@@ -433,9 +434,9 @@ fn draw_queue(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
         .iter()
         .enumerate()
         .map(|(display_idx, &real_idx)| {
-            let t = &state.queue_tracks[real_idx];
-            let is_selected = display_idx == state.queue_selected;
-            let is_playing = state.queue_playing == Some(real_idx);
+            let t = &state.queue.tracks[real_idx];
+            let is_selected = display_idx == state.queue.selected;
+            let is_playing = state.queue.playing == Some(real_idx);
             let marker = if is_selected {
                 "▸ "
             } else if is_playing {
@@ -463,17 +464,17 @@ fn draw_queue(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
         })
         .collect();
 
-    let mut list_state = ListState::default().with_offset(state.queue_scroll);
+    let mut list_state = ListState::default().with_offset(state.queue.scroll);
     let list = List::new(items);
     f.render_stateful_widget(list, list_area, &mut list_state);
 }
 
 fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
-    let has_filter = !state.filter_query.is_empty() || state.filter_active;
+    let has_filter = !state.filter.query.is_empty() || state.filter.active;
 
-    match &state.library_sub_view {
+    match &state.library.sub_view {
         LibrarySubView::Playlists => {
-            if state.playlists.is_empty() {
+            if state.library.playlists.is_empty() {
                 f.render_widget(
                     Paragraph::new(Span::styled(
                         "Loading playlists…",
@@ -488,14 +489,14 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
             let (list_area, filtered) = if has_filter {
                 let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
                 draw_filter_bar(f, rows[0], state, theme);
-                let q = state.filter_query.to_lowercase();
-                let indices: Vec<usize> = state.playlists.iter().enumerate()
+                let q = state.filter.query.to_lowercase();
+                let indices: Vec<usize> = state.library.playlists.iter().enumerate()
                     .filter(|(_, s)| s.to_lowercase().contains(&q))
                     .map(|(i, _)| i)
                     .collect();
                 (rows[1], indices)
             } else {
-                (area, (0..state.playlists.len()).collect())
+                (area, (0..state.library.playlists.len()).collect())
             };
 
             if filtered.is_empty() && has_filter {
@@ -511,13 +512,13 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
                 .iter()
                 .enumerate()
                 .map(|(display_idx, &real_idx)| {
-                    let name = &state.playlists[real_idx];
-                    let marker = if display_idx == state.library_selected {
+                    let name = &state.library.playlists[real_idx];
+                    let marker = if display_idx == state.library.selected {
                         "▸ "
                     } else {
                         "  "
                     };
-                    let style = if display_idx == state.library_selected {
+                    let style = if display_idx == state.library.selected {
                         Style::default()
                             .fg(theme.accent)
                             .add_modifier(Modifier::BOLD)
@@ -528,7 +529,7 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
                 })
                 .collect();
 
-            let mut list_state = ListState::default().with_offset(state.library_scroll);
+            let mut list_state = ListState::default().with_offset(state.library.scroll);
             f.render_stateful_widget(List::new(items), list_area, &mut list_state);
         }
         LibrarySubView::Tracks(playlist_name) => {
@@ -558,7 +559,7 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
                 rows[1]
             };
 
-            if state.playlist_tracks.is_empty() {
+            if state.library.tracks.is_empty() {
                 f.render_widget(
                     Paragraph::new(Span::styled(
                         "Loading…",
@@ -568,14 +569,14 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
                     list_area,
                 );
             } else {
-                let filtered: Vec<usize> = if !state.filter_query.is_empty() {
-                    let q = state.filter_query.to_lowercase();
-                    state.playlist_tracks.iter().enumerate()
+                let filtered: Vec<usize> = if !state.filter.query.is_empty() {
+                    let q = state.filter.query.to_lowercase();
+                    state.library.tracks.iter().enumerate()
                         .filter(|(_, t)| t.name.to_lowercase().contains(&q) || t.artist.to_lowercase().contains(&q))
                         .map(|(i, _)| i)
                         .collect()
                 } else {
-                    (0..state.playlist_tracks.len()).collect()
+                    (0..state.library.tracks.len()).collect()
                 };
 
                 if filtered.is_empty() && has_filter {
@@ -591,14 +592,14 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
                     .iter()
                     .enumerate()
                     .map(|(display_idx, &real_idx)| {
-                        let t = &state.playlist_tracks[real_idx];
-                        let marker = if display_idx == state.playlist_tracks_selected {
+                        let t = &state.library.tracks[real_idx];
+                        let marker = if display_idx == state.library.tracks_selected {
                             "▸ "
                         } else {
                             "  "
                         };
                         let dur = format_time(t.duration);
-                        let style = if display_idx == state.playlist_tracks_selected {
+                        let style = if display_idx == state.library.tracks_selected {
                             Style::default()
                                 .fg(theme.accent)
                                 .add_modifier(Modifier::BOLD)
@@ -616,7 +617,7 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
                     .collect();
 
                 let mut list_state =
-                    ListState::default().with_offset(state.playlist_tracks_scroll);
+                    ListState::default().with_offset(state.library.tracks_scroll);
                 f.render_stateful_widget(List::new(items), list_area, &mut list_state);
             }
         }
@@ -627,23 +628,23 @@ fn draw_search(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     let rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(1)]).split(area);
 
     // Search input — accent color + cursor when editing, dimmed when browsing
-    if state.search_editing {
+    if state.search.editing {
         let search_line = Line::from(vec![
             Span::styled("/ ", Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)),
-            Span::styled(format!("{}▏", state.search_query), Style::default().fg(theme.accent)),
+            Span::styled(format!("{}▏", state.search.query), Style::default().fg(theme.accent)),
             Span::styled("  Enter to browse · Esc to stop", Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM)),
         ]);
         f.render_widget(Paragraph::new(search_line), rows[0]);
     } else {
         let search_line = Line::from(vec![
-            Span::styled(format!("/ {}", state.search_query), Style::default().fg(theme.text_dim)),
+            Span::styled(format!("/ {}", state.search.query), Style::default().fg(theme.text_dim)),
             Span::styled("  / to edit", Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM)),
         ]);
         f.render_widget(Paragraph::new(search_line), rows[0]);
     }
 
-    if state.search_results.is_empty() {
-        if !state.search_query.is_empty() {
+    if state.search.results.is_empty() {
+        if !state.search.query.is_empty() {
             f.render_widget(
                 Paragraph::new(Span::styled(
                     "No results",
@@ -657,19 +658,20 @@ fn draw_search(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     }
 
     let items: Vec<ListItem> = state
-        .search_results
+        .search
+        .results
         .iter()
         .enumerate()
         .map(|(i, r)| {
-            let marker = if !state.search_editing && i == state.search_selected {
+            let marker = if !state.search.editing && i == state.search.selected {
                 "▸ "
             } else {
                 "  "
             };
-            let style = if state.search_editing {
+            let style = if state.search.editing {
                 // Editing: dim all results to show focus is on the search bar
                 Style::default().fg(theme.text_dim)
-            } else if i == state.search_selected {
+            } else if i == state.search.selected {
                 Style::default()
                     .fg(theme.accent)
                     .add_modifier(Modifier::BOLD)
@@ -683,7 +685,7 @@ fn draw_search(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
         })
         .collect();
 
-    let mut list_state = ListState::default().with_offset(state.search_scroll);
+    let mut list_state = ListState::default().with_offset(state.search.scroll);
     f.render_stateful_widget(List::new(items), rows[2], &mut list_state);
 }
 
@@ -694,7 +696,7 @@ fn draw_lyrics(
     theme: &Theme,
     effective_position: Option<f64>,
 ) {
-    if state.lyrics_lines.is_empty() {
+    if state.lyrics.lines.is_empty() {
         let msg = if state.lyrics_enabled {
             "No lyrics available"
         } else {
@@ -709,10 +711,11 @@ fn draw_lyrics(
     }
 
     // Find current line index for synced lyrics
-    let current_line = if state.lyrics_synced {
+    let current_line = if state.lyrics.synced {
         effective_position.and_then(|pos| {
             state
-                .lyrics_lines
+                .lyrics
+                .lines
                 .iter()
                 .enumerate()
                 .rev()
@@ -724,7 +727,8 @@ fn draw_lyrics(
     };
 
     let lines: Vec<Line> = state
-        .lyrics_lines
+        .lyrics
+        .lines
         .iter()
         .enumerate()
         .map(|(i, line)| {
@@ -732,7 +736,7 @@ fn draw_lyrics(
                 Style::default()
                     .fg(theme.accent)
                     .add_modifier(Modifier::BOLD)
-            } else if state.lyrics_synced && current_line.is_some() {
+            } else if state.lyrics.synced && current_line.is_some() {
                 Style::default().fg(theme.text_dim)
             } else {
                 Style::default().fg(theme.text)
@@ -741,15 +745,15 @@ fn draw_lyrics(
         })
         .collect();
 
-    let paragraph = Paragraph::new(lines).scroll((state.lyrics_scroll as u16, 0));
+    let paragraph = Paragraph::new(lines).scroll((state.lyrics.scroll as u16, 0));
     f.render_widget(paragraph, area);
 }
 
 fn draw_theme_picker(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     // Size the popup to fit content with padding
-    let max_name_len = state.themes.iter().map(|(n, _)| n.len()).max().unwrap_or(10);
+    let max_name_len = state.theme.all.iter().map(|(n, _)| n.len()).max().unwrap_or(10);
     let popup_w = (max_name_len as u16 + 8).min(area.width.saturating_sub(4)); // "▸ " + name + " ✓" + padding
-    let popup_h = (state.themes.len() as u16 + 2).min(area.height.saturating_sub(2)); // +2 for border
+    let popup_h = (state.theme.all.len() as u16 + 2).min(area.height.saturating_sub(2)); // +2 for border
 
     let x = area.x + (area.width.saturating_sub(popup_w)) / 2;
     let y = area.y + (area.height.saturating_sub(popup_h)) / 2;
@@ -773,17 +777,18 @@ fn draw_theme_picker(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme)
     f.render_widget(block, popup);
 
     let items: Vec<ListItem> = state
-        .themes
+        .theme
+        .all
         .iter()
         .enumerate()
         .map(|(i, (name, _))| {
-            let marker = if i == state.theme_selected {
+            let marker = if i == state.theme.selected {
                 "▸ "
             } else {
                 "  "
             };
-            let check = if *name == state.theme_name { " ✓" } else { "" };
-            let style = if i == state.theme_selected {
+            let check = if *name == state.theme.name { " ✓" } else { "" };
+            let style = if i == state.theme.selected {
                 Style::default()
                     .fg(theme.accent)
                     .add_modifier(Modifier::BOLD)
@@ -794,7 +799,7 @@ fn draw_theme_picker(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme)
         })
         .collect();
 
-    let mut list_state = ListState::default().with_offset(state.theme_scroll);
+    let mut list_state = ListState::default().with_offset(state.theme.scroll);
     f.render_stateful_widget(List::new(items), inner, &mut list_state);
 }
 
@@ -882,7 +887,7 @@ fn draw_playlist_picker(f: &mut Frame, area: Rect, state: &AppState, theme: &The
         rows[0],
     );
 
-    if state.playlists.is_empty() {
+    if state.library.playlists.is_empty() {
         f.render_widget(
             Paragraph::new(Span::styled(
                 "No playlists",
@@ -895,16 +900,17 @@ fn draw_playlist_picker(f: &mut Frame, area: Rect, state: &AppState, theme: &The
     }
 
     let items: Vec<ListItem> = state
+        .library
         .playlists
         .iter()
         .enumerate()
         .map(|(i, name)| {
-            let marker = if i == state.playlist_picker_selected {
+            let marker = if i == state.overlays.playlist_picker_selected {
                 "▸ "
             } else {
                 "  "
             };
-            let style = if i == state.playlist_picker_selected {
+            let style = if i == state.overlays.playlist_picker_selected {
                 Style::default()
                     .fg(theme.accent)
                     .add_modifier(Modifier::BOLD)
@@ -915,12 +921,12 @@ fn draw_playlist_picker(f: &mut Frame, area: Rect, state: &AppState, theme: &The
         })
         .collect();
 
-    let mut list_state = ListState::default().with_offset(state.playlist_picker_scroll);
+    let mut list_state = ListState::default().with_offset(state.overlays.playlist_picker_scroll);
     f.render_stateful_widget(List::new(items), rows[1], &mut list_state);
 }
 
 fn draw_help_line(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
-    let left = if state.active_tab == Tab::Search && state.search_editing {
+    let left = if state.active_tab == Tab::Search && state.search.editing {
         "Enter browse · Esc stop editing"
     } else {
         "? Help · q Quit"

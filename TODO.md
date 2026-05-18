@@ -25,6 +25,7 @@
 
 ## Done
 
+- [x] Codebase audit pass: PKCE PRNG → `rand` crate, FFI null-byte safety in `bridge.rs` + Swift `strdup` fallback, TUI error overlay, `fire_and_refresh` retry/backoff, slim `interpolated_state` (no per-tick AppState clone), background-thread shutdown signal, `main.rs` split into `handlers.rs`, `AppState` decomposed into per-concern sub-structs #refactor
 - [x] Spotify port — `MusicBackend` trait in `backend.rs`, Apple Music refactored behind it in `bridge.rs` #refactor
 - [x] `SpotifyBackend` in `spotify.rs` via Spotify Web API (ureq HTTP) #feature
 - [x] OAuth 2.0 PKCE flow (browser open → localhost:18234 callback → token cached at `~/.config/muse/spotify_token.json`) #feature
