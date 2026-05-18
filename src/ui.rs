@@ -267,6 +267,55 @@ fn draw_tab_content(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) 
     if state.show_theme_picker {
         draw_theme_picker(f, area, state, theme);
     }
+    if let Some(msg) = &state.error_message {
+        draw_error_overlay(f, area, msg, theme);
+    }
+}
+
+fn draw_error_overlay(f: &mut Frame, area: Rect, msg: &str, theme: &Theme) {
+    let lines: Vec<&str> = msg.lines().collect();
+    let popup_w = lines
+        .iter()
+        .map(|l| l.chars().count() as u16)
+        .max()
+        .unwrap_or(40)
+        .saturating_add(4)
+        .max(30)
+        .min(area.width.saturating_sub(4));
+    let popup_h = (lines.len() as u16 + 4).min(area.height.saturating_sub(2));
+
+    let x = area.x + (area.width.saturating_sub(popup_w)) / 2;
+    let y = area.y + (area.height.saturating_sub(popup_h)) / 2;
+    let popup = Rect::new(x, y, popup_w, popup_h);
+
+    f.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .title(Span::styled(
+            " Error ",
+            Style::default().fg(theme.error).add_modifier(Modifier::BOLD),
+        ))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.error));
+
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let mut body: Vec<Line> = lines
+        .iter()
+        .map(|l| Line::from(Span::styled(*l, Style::default().fg(theme.text))))
+        .collect();
+    body.push(Line::from(""));
+    body.push(Line::from(Span::styled(
+        "press any key to dismiss",
+        Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM),
+    )));
+
+    f.render_widget(
+        Paragraph::new(body).alignment(Alignment::Center),
+        inner,
+    );
 }
 
 fn draw_filter_bar(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {

@@ -131,10 +131,15 @@ fn create_backend() -> Arc<dyn MusicBackend> {
         #[cfg(feature = "spotify")]
         Some("spotify") => {
             let client_id = load_spotify_client_id().unwrap_or_else(|| {
-                eprintln!(
-                    "Spotify backend requires client_id under [spotify] in ~/.config/muse/config.toml\n\
-                     Get one at https://developer.spotify.com/dashboard"
-                );
+                eprintln!("muse: Spotify backend selected but client_id is missing.");
+                eprintln!();
+                eprintln!("Add a [spotify] section to ~/.config/muse/config.toml:");
+                eprintln!();
+                eprintln!("    [spotify]");
+                eprintln!("    client_id = \"YOUR_CLIENT_ID\"");
+                eprintln!();
+                eprintln!("Register an app at https://developer.spotify.com/dashboard");
+                eprintln!("to obtain a client_id (no client secret needed — PKCE flow).");
                 std::process::exit(1);
             });
             Arc::new(spotify::SpotifyBackend::new(&client_id))
@@ -188,9 +193,21 @@ fn main() -> io::Result<()> {
         .and_then(|doc| doc.get("show_artwork").and_then(|v| v.as_bool()))
         .unwrap_or(true);
 
-    // Detect image protocol before entering raw mode (queries terminal)
+    // Detect image protocol before entering raw mode (queries terminal).
+    // On failure, fall back to halfblocks and surface the reason via the
+    // error overlay so users can see why sixel/kitty wasn't selected.
+    let mut startup_error: Option<String> = None;
     let picker = if show_artwork {
-        Some(Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks()))
+        match Picker::from_query_stdio() {
+            Ok(p) => Some(p),
+            Err(e) => {
+                startup_error = Some(format!(
+                    "Terminal image protocol detection failed: {}\n\nFalling back to halfblocks.",
+                    e
+                ));
+                Some(Picker::halfblocks())
+            }
+        }
     } else {
         None
     };
@@ -222,6 +239,7 @@ fn main() -> io::Result<()> {
         initial_artwork,
         initial_artwork_key,
         backend,
+        startup_error,
     );
 
     // Restore terminal
@@ -243,11 +261,13 @@ fn run_app(
     initial_artwork: Option<ratatui_image::protocol::StatefulProtocol>,
     initial_artwork_key: String,
     backend: Arc<dyn MusicBackend>,
+    startup_error: Option<String>,
 ) -> io::Result<()> {
     let (tx, rx) = mpsc::channel::<AppEvent>();
 
     let mut state = AppState::default();
     state.themes = theme::load_themes();
+    state.error_message = startup_error;
     let mut current_theme = theme::default_theme();
     let mut last_refresh = Instant::now();
     let refresh_interval = Duration::from_secs(2);
@@ -630,6 +650,7 @@ fn interpolated_state(state: &AppState, last_update: &Instant) -> AppState {
         lastfm_status: state.lastfm_status.clone(),
         filter_query: state.filter_query.clone(),
         filter_active: state.filter_active,
+        error_message: state.error_message.clone(),
     };
 
     // Interpolate position when playing
@@ -796,6 +817,12 @@ fn handle_key(
     tx: &mpsc::Sender<AppEvent>,
     backend: &Arc<dyn MusicBackend>,
 ) -> bool {
+    // Error overlay — any key dismisses
+    if state.error_message.is_some() {
+        state.error_message = None;
+        return false;
+    }
+
     // Help overlay
     if key.code == KeyCode::Char('?') {
         state.show_help = !state.show_help;

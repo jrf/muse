@@ -133,6 +133,9 @@ pub struct AppState {
     // Filter (shared across Queue and Library)
     pub filter_query: String,
     pub filter_active: bool,
+
+    // Transient error overlay (dismissed on any key)
+    pub error_message: Option<String>,
 }
 
 impl Default for AppState {
@@ -185,6 +188,7 @@ impl Default for AppState {
             lastfm_status: String::new(),
             filter_query: String::new(),
             filter_active: false,
+            error_message: None,
         }
     }
 }
