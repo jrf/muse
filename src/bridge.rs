@@ -360,7 +360,15 @@ impl MusicBackend for AppleMusicBackend {
         unsafe { music_remove_from_playlist(c.as_ptr(), index as i32) }
     }
 
-    fn setup_notifications(&self, tx: mpsc::Sender<NotificationInfo>) {
+    fn setup_notifications(
+        &self,
+        tx: mpsc::Sender<NotificationInfo>,
+        _shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) {
+        // Apple Music notifications are event-driven (callbacks fire from
+        // NSDistributedNotificationCenter), so there's no polling loop to
+        // interrupt. The shutdown flag is unused here; on exit the dropped
+        // channel sender will cause forwarded notifications to be discarded.
         if let Ok(mut guard) = NOTIFICATION_TX.lock() {
             guard.replace(tx);
         }

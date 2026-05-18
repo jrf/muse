@@ -832,7 +832,11 @@ impl MusicBackend for SpotifyBackend {
         }
     }
 
-    fn setup_notifications(&self, tx: mpsc::Sender<NotificationInfo>) {
+    fn setup_notifications(
+        &self,
+        tx: mpsc::Sender<NotificationInfo>,
+        shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) {
         // Spawn a polling thread that checks playback state every 2 seconds
         let client_id = self.client_id.clone();
         let token = self.token.lock().ok().and_then(|g| g.clone());
@@ -842,7 +846,14 @@ impl MusicBackend for SpotifyBackend {
             let mut last_player_state = String::new();
 
             loop {
-                std::thread::sleep(Duration::from_secs(2));
+                // Sleep in short slices so a shutdown is detected promptly
+                // instead of waiting the full 2s tick before exiting.
+                for _ in 0..20 {
+                    if shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
 
                 // Build a temporary backend just for API calls in this thread
                 let backend = SpotifyBackend {

@@ -10,6 +10,7 @@ mod theme;
 mod ui;
 
 use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
@@ -310,11 +311,16 @@ fn run_app(
         state.lastfm_status = "last.fm".to_string();
     }
 
+    // Shared flag used to tell background threads to exit promptly when the
+    // app is quitting (rather than relying on channel-disconnect, which can
+    // leave threads sleeping for a full polling interval after main returns).
+    let shutdown = Arc::new(AtomicBool::new(false));
+
     // Set up notification delivery from the backend
     {
         let tx_notify = tx.clone();
         let (notify_tx, notify_rx) = mpsc::channel::<backend::NotificationInfo>();
-        backend.setup_notifications(notify_tx);
+        backend.setup_notifications(notify_tx, shutdown.clone());
 
         // Bridge thread: forward backend notifications to AppEvent channel
         std::thread::spawn(move || {
@@ -331,7 +337,11 @@ fn run_app(
 
     // Spawn input thread
     let tx_input = tx.clone();
+    let shutdown_input = shutdown.clone();
     std::thread::spawn(move || loop {
+        if shutdown_input.load(Ordering::Relaxed) {
+            break;
+        }
         if event::poll(Duration::from_millis(50)).unwrap_or(false) {
             if let Ok(Event::Key(key)) = event::read() {
                 if tx_input.send(AppEvent::Key(key)).is_err() {
@@ -343,14 +353,18 @@ fn run_app(
 
     // Spawn tick thread (for progress interpolation + runloop pumping)
     let tx_tick = tx.clone();
+    let shutdown_tick = shutdown.clone();
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_millis(100));
+        if shutdown_tick.load(Ordering::Relaxed) {
+            break;
+        }
         if tx_tick.send(AppEvent::Tick).is_err() {
             break;
         }
     });
 
-    loop {
+    let result = 'main_loop: loop {
         // Render — pass elapsed-since-last-position-update to ui::draw so it
         // can interpolate the displayed track position without us cloning
         // AppState every tick.
@@ -366,7 +380,7 @@ fn run_app(
             Ok(event) => match event {
                 AppEvent::Key(key) => {
                     if handle_key(key, &mut state, &mut current_theme, &tx, &backend) {
-                        return Ok(());
+                        break 'main_loop Ok(());
                     }
                 }
                 AppEvent::Tick => {
@@ -528,9 +542,13 @@ fn run_app(
                 }
             },
             Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
+            Err(mpsc::RecvTimeoutError::Disconnected) => break 'main_loop Ok(()),
         }
-    }
+    };
+
+    // Signal background threads to exit promptly before we tear down.
+    shutdown.store(true, Ordering::Relaxed);
+    result
 }
 
 fn apply_fresh_state(

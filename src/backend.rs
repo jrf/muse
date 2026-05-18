@@ -4,7 +4,9 @@
 //! trait, which provides a uniform interface for playback control, library
 //! browsing, search, and notifications.
 
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
+use std::sync::Arc;
 
 // MARK: - Shared types
 
@@ -157,9 +159,17 @@ pub trait MusicBackend: Send + Sync {
     /// Set up notification delivery. The backend should send `NotificationInfo`
     /// through the provided channel whenever playback state changes.
     ///
+    /// `shutdown` is a shared flag that backends with their own polling loops
+    /// (e.g. Spotify) should check each iteration so they exit promptly when
+    /// the app is quitting, rather than holding the process up sleeping.
+    ///
     /// For Apple Music: registers a C callback via NSDistributedNotificationCenter.
     /// For Spotify: spawns a polling thread that checks the API periodically.
-    fn setup_notifications(&self, tx: mpsc::Sender<NotificationInfo>);
+    fn setup_notifications(
+        &self,
+        tx: mpsc::Sender<NotificationInfo>,
+        shutdown: Arc<AtomicBool>,
+    );
 
     /// Called periodically from the main thread (~100ms).
     ///
