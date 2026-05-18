@@ -1485,10 +1485,17 @@ fn fire_and_refresh<F: FnOnce(&dyn MusicBackend) + Send + 'static>(
     let b = backend.clone();
     std::thread::spawn(move || {
         action(&*b);
-        // Give the music service time to update before fetching state.
-        std::thread::sleep(Duration::from_millis(500));
-        let fresh = b.fetch_state();
-        let _ = tx2.send(AppEvent::StateRefreshed(fresh));
+        // Poll state after the action lands. The first fetch handles fast
+        // backends (Apple Music local AppleScript); the follow-ups catch
+        // Spotify Web API lag (~hundreds of ms past the action). Each
+        // refresh re-applies state idempotently so extra fetches are cheap.
+        for delay_ms in [500u64, 800, 800] {
+            std::thread::sleep(Duration::from_millis(delay_ms));
+            let fresh = b.fetch_state();
+            if tx2.send(AppEvent::StateRefreshed(fresh)).is_err() {
+                break;
+            }
+        }
     });
 }
 
