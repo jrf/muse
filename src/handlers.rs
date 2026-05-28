@@ -715,6 +715,35 @@ fn handle_library_key(
                     };
                     if let Some(idx) = real_idx {
                         let name = state.library.playlists[idx].clone();
+                        state.queue.tracks.clear();
+                        state.queue.playlist_name = name.clone();
+                        state.queue.selected = 0;
+                        state.queue.scroll = 0;
+                        state.queue.playing = Some(0);
+                        playlist::save_queue_state(&name, 0, 0);
+                        state.filter.active = false;
+                        let play_name = name.clone();
+                        fire_and_refresh(backend, tx, move |b| {
+                            b.play_track_in_playlist(&play_name, 0)
+                        });
+                        let tx2 = tx.clone();
+                        let b = backend.clone();
+                        std::thread::spawn(move || {
+                            let tracks = b.get_playlist_tracks(&name);
+                            let _ = tx2.send(AppEvent::PlaylistTracksLoaded(name, tracks));
+                        });
+                    }
+                }
+                KeyCode::Right => {
+                    let real_idx = if has_filter {
+                        filtered.get(state.library.selected).copied()
+                    } else if state.library.selected < state.library.playlists.len() {
+                        Some(state.library.selected)
+                    } else {
+                        None
+                    };
+                    if let Some(idx) = real_idx {
+                        let name = state.library.playlists[idx].clone();
                         state.library.sub_view = LibrarySubView::Tracks(name.clone());
                         state.library.tracks.clear();
                         state.library.tracks_selected = 0;

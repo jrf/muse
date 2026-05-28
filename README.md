@@ -119,7 +119,8 @@ Launch `muse` in any terminal. The player panel at the top always shows the curr
 | `↑` / `↓` | Navigate list / Scroll lyrics |
 | `PgUp` / `PgDn` | Page up / down |
 | `Home` / `End` | Jump to top / bottom |
-| `Enter` | Play track / Browse playlist |
+| `Enter` | Play track / playlist |
+| `→` | Browse playlist tracks (Library) |
 | `/` | Filter list (queue/library) / Search |
 | `Backspace` | Back (library) / Clear (search) |
 | `t` | Theme picker |
@@ -129,7 +130,7 @@ Launch `muse` in any terminal. The player panel at the top always shows the curr
 ### Tabs
 
 - **Queue** — tracks from the last playlist you played. Select a track and press Enter to jump to it. Tracks auto-advance when the current one finishes. Press `d` to remove a track. Press `/` to filter by name or artist.
-- **Library** — browse your playlists. Press Enter to see tracks, Enter again to play. Press `d` to remove a track from the playlist. Backspace goes back to the playlist list. Press `/` to filter playlists or tracks.
+- **Library** — browse your playlists. Press Enter on a playlist to start playing it; press `→` to browse its tracks first. Inside a playlist, Enter plays the selected track. Press `d` to remove a track from the playlist. Backspace goes back to the playlist list. Press `/` to filter playlists or tracks.
 - **Search** — type to search your library. Results appear as you type (minimum 2 characters). Enter plays the selected result.
 - **Lyrics** — displays lyrics for the current track. Fetched from [LRCLIB](https://lrclib.net) (falls back to embedded lyrics if available). Scroll with arrow keys. Shows "No lyrics available" when none are found.
 

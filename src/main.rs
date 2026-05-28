@@ -428,6 +428,14 @@ fn run_app(
                     state.library.playlists = playlists;
                 }
                 AppEvent::PlaylistTracksLoaded(playlist_name, tracks) => {
+                    if state.queue.playlist_name == playlist_name && state.queue.tracks.is_empty() {
+                        state.queue.tracks = tracks.clone();
+                        playlist::save_queue_state(
+                            &state.queue.playlist_name,
+                            state.queue.playing.unwrap_or(0),
+                            state.queue.tracks.len(),
+                        );
+                    }
                     if let LibrarySubView::Tracks(ref current) = state.library.sub_view {
                         if *current == playlist_name {
                             state.library.tracks = tracks;
