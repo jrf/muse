@@ -595,7 +595,7 @@ fn handle_queue_key(
                 playlist::save_queue_state(&state.queue.playlist_name, idx, state.queue.tracks.len());
                 let playlist = state.queue.playlist_name.clone();
                 fire_and_refresh(backend, tx, move |b| b.play_track_in_playlist(&playlist, idx));
-                clear_filter(state);
+                state.filter.active = false;
             }
         }
         KeyCode::Char('d') | KeyCode::Char('x') if !state.filter.active => {
@@ -719,7 +719,7 @@ fn handle_library_key(
                         state.library.tracks.clear();
                         state.library.tracks_selected = 0;
                         state.library.tracks_scroll = 0;
-                        clear_filter(state);
+                        state.filter.active = false;
                         let tx2 = tx.clone();
                         let b = backend.clone();
                         std::thread::spawn(move || {
@@ -775,7 +775,7 @@ fn handle_library_key(
                         fire_and_refresh(backend, tx, move |b| {
                             b.play_track_in_playlist(&name, idx)
                         });
-                        clear_filter(state);
+                        state.filter.active = false;
                     }
                 }
                 KeyCode::Char('d') | KeyCode::Char('x') if !state.filter.active => {
