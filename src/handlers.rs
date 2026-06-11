@@ -757,6 +757,32 @@ fn handle_library_key(
                         });
                     }
                 }
+                KeyCode::Char('Q') => {
+                    let real_idx = if has_filter {
+                        filtered.get(state.library.selected).copied()
+                    } else if state.library.selected < state.library.playlists.len() {
+                        Some(state.library.selected)
+                    } else {
+                        None
+                    };
+                    if let Some(idx) = real_idx {
+                        let name = state.library.playlists[idx].clone();
+                        state.queue.tracks.clear();
+                        state.queue.playlist_name = name.clone();
+                        state.queue.selected = 0;
+                        state.queue.scroll = 0;
+                        state.queue.playing = None;
+                        playlist::save_queue_state(&name, 0, 0);
+                        state.filter.active = false;
+                        state.active_tab = Tab::Queue;
+                        let tx2 = tx.clone();
+                        let b = backend.clone();
+                        std::thread::spawn(move || {
+                            let tracks = b.get_playlist_tracks(&name);
+                            let _ = tx2.send(AppEvent::PlaylistTracksLoaded(name, tracks));
+                        });
+                    }
+                }
                 KeyCode::Esc if has_filter => {
                     clear_filter(state);
                 }

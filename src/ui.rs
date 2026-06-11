@@ -840,6 +840,7 @@ fn draw_help_overlay(f: &mut Frame, area: Rect, theme: &Theme) {
         ("↑ / ↓", "Navigate list"),
         ("Enter", "Play"),
         ("→", "Browse playlist"),
+        ("Q", "Queue without playing"),
         ("Backspace", "Back / Clear"),
         ("?", "Toggle help"),
         ("q", "Quit"),
