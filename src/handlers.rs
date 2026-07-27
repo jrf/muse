@@ -975,7 +975,6 @@ fn handle_theme_picker_key(key: KeyEvent, state: &mut AppState, theme: &mut Them
                 let (ref name, t) = state.theme.all[state.theme.selected];
                 state.theme.name = name.clone();
                 *theme = t;
-                save_theme(&state.theme.name);
                 state.theme.picker_visible = false;
             }
         }
@@ -1080,17 +1079,4 @@ pub fn fire_and_refresh<F: FnOnce(&dyn MusicBackend) + Send + 'static>(
             }
         }
     });
-}
-
-// MARK: - Theme persistence (here because the theme picker handler triggers it)
-
-fn save_theme(name: &str) {
-    let dir = crate::config_dir();
-    let _ = std::fs::create_dir_all(&dir);
-
-    let path = crate::config_file();
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut doc: toml::Table = existing.parse().unwrap_or_default();
-    doc.insert("theme".to_string(), toml::Value::String(name.to_string()));
-    let _ = std::fs::write(path, toml::to_string_pretty(&doc).unwrap_or_default());
 }
