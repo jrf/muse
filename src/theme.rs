@@ -3,8 +3,12 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Theme {
+    pub background: Color,
+    pub cursor_bg: Color,
     pub border: Color,
     pub accent: Color,
+    pub selection: Color,
+    pub key: Color,
     pub text: Color,
     pub text_bright: Color,
     pub text_dim: Color,
@@ -64,9 +68,30 @@ fn parse_theme(contents: &str) -> Option<Theme> {
             .find_map(|name| colors.get(*name).and_then(parse_color))
     };
 
+    // Background roles were added after the original foreground-only schema.
+    // Keep old themes loadable: an omitted background means "use the terminal
+    // default", while cursor_bg falls back to that same background.
+    let background = resolve(&["background"], &["bg", "base", "background"])
+        .unwrap_or(Color::Reset);
+    let cursor_bg = resolve(
+        &["cursor_bg"],
+        &["bg_highlight", "surface0", "cursor_bg", "bg"],
+    )
+    .unwrap_or(background);
+
     Some(Theme {
+        background,
+        cursor_bg,
         border: resolve(&["border"], &["border", "fg_muted", "surface1"])?,
         accent: resolve(&["accent"], &["accent", "magenta", "mauve", "pink"])?,
+        selection: resolve(
+            &["selection"],
+            &["selection", "cyan", "blue", "accent", "magenta", "mauve"],
+        )?,
+        key: resolve(
+            &["key"],
+            &["key", "cyan", "blue", "accent", "magenta", "mauve"],
+        )?,
         text: resolve(&["text"], &["text", "fg"])?,
         text_bright: resolve(
             &["text_bright", "heading"],
@@ -176,8 +201,12 @@ pub fn configured_theme_name(configured_path: &str) -> String {
 pub fn default_theme() -> Theme {
     // Emergency fallback used only when the shared catalog cannot be loaded.
     Theme {
+        background: Color::Reset,
+        cursor_bg: Color::Indexed(236),
         border: Color::Indexed(75),
         accent: Color::Indexed(213),
+        selection: Color::Indexed(81),
+        key: Color::Indexed(51),
         text: Color::Indexed(252),
         text_bright: Color::Indexed(255),
         text_dim: Color::Indexed(245),
@@ -205,6 +234,7 @@ mod tests {
     const SHARED_THEME: &str = r##"
 [colors]
 base = "#1e1e2e"
+surface0 = "#313244"
 surface1 = "#45475a"
 text = "#cdd6f4"
 subtext0 = "#a6adc8"
@@ -214,8 +244,12 @@ blue = "#89b4fa"
 red = "#f38ba8"
 
 [ui]
+background = "base"
+cursor_bg = "surface0"
 border = "surface1"
 accent = "mauve"
+selection = "blue"
+key = "blue"
 text = "text"
 text_bright = "text"
 text_dim = "subtext0"
@@ -228,8 +262,12 @@ error = "red"
     fn parses_shared_semantic_theme() {
         let theme = parse_theme(SHARED_THEME).expect("shared theme");
 
+        assert_eq!(theme.background, Color::Rgb(0x1e, 0x1e, 0x2e));
+        assert_eq!(theme.cursor_bg, Color::Rgb(0x31, 0x32, 0x44));
         assert_eq!(theme.border, Color::Rgb(0x45, 0x47, 0x5a));
         assert_eq!(theme.accent, Color::Rgb(0xcb, 0xa6, 0xf7));
+        assert_eq!(theme.selection, Color::Rgb(0x89, 0xb4, 0xfa));
+        assert_eq!(theme.key, Color::Rgb(0x89, 0xb4, 0xfa));
         assert_eq!(theme.text, Color::Rgb(0xcd, 0xd6, 0xf4));
         assert_eq!(theme.time_text, Color::Rgb(0x89, 0xb4, 0xfa));
         assert_eq!(theme.error, Color::Rgb(0xf3, 0x8b, 0xa8));

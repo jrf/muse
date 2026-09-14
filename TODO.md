@@ -25,6 +25,8 @@
 
 ## Done
 
+- [x] Hand-rolled Kitty direct-placement album art renderer (`a=T`) so artwork renders correctly in WezTerm instead of exposing Unicode placeholder glyphs #bug
+- [x] Expanded shared theme support with full-frame background, cursor highlight, selection, and key roles so themes such as synthwave retain their semantic palette #improvement
 - [x] `image_protocol` config option to force a specific image protocol (kitty/sixel/iterm2/halfblocks/auto) when terminal capability detection fails or picks wrong #feature
 - [x] Codebase audit pass: PKCE PRNG → `rand` crate, FFI null-byte safety in `bridge.rs` + Swift `strdup` fallback, TUI error overlay, `fire_and_refresh` retry/backoff, slim `interpolated_state` (no per-tick AppState clone), background-thread shutdown signal, `main.rs` split into `handlers.rs`, `AppState` decomposed into per-concern sub-structs #refactor
 - [x] Spotify port — `MusicBackend` trait in `backend.rs`, Apple Music refactored behind it in `bridge.rs` #refactor

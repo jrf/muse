@@ -68,17 +68,32 @@ client_id = "YOUR_ID"            # required if backend = "spotify"
 
 ```toml
 [colors]
-border = 75        # 256-color index (0-255)
-accent = 213
-text = 252
-text_bright = 255
-text_dim = 245
-text_muted = 240
-time_text = 255
-error = 196
+bg = "#1a1a2e"
+bg_highlight = "#2a2a4e"
+fg = "#e0def4"
+fg_bright = "#f0eeff"
+fg_dim = "#8888aa"
+fg_muted = "#555577"
+hot_pink = "#ff2975"
+cyan = "#00e5ff"
+red = "#ff6b9d"
+
+[ui]
+background = "bg"
+cursor_bg = "bg_highlight"
+border = "fg_muted"
+accent = "hot_pink"
+selection = "cyan"
+key = "cyan"
+text = "fg"
+text_bright = "fg_bright"
+text_dim = "fg_dim"
+text_muted = "fg_muted"
+heading = "fg_bright"
+error = "red"
 ```
 
-Colors can be 256-color indices (integers) or hex RGB strings (`"#82aaff"`).
+Colors can be 256-color indices (integers) or hex RGB strings (`"#82aaff"`). UI roles may reference named entries in `[colors]` or contain colors directly. Muse uses `background` for the complete frame, `cursor_bg` and `selection` for the focused list row, `key` for keybinding/input markers, `accent` for branding and progress, and `heading` for time/subtitle text.
 
 ### Spotify Setup
 

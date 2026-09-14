@@ -53,7 +53,9 @@ fn create_backend() -> Arc<dyn MusicBackend> {
         }
         #[cfg(not(feature = "spotify"))]
         Some("spotify") => {
-            eprintln!("Spotify support not compiled in. Build with: cargo build --features spotify");
+            eprintln!(
+                "Spotify support not compiled in. Build with: cargo build --features spotify"
+            );
             std::process::exit(1);
         }
         #[cfg(all(feature = "apple-music", target_os = "macos"))]
@@ -220,7 +222,14 @@ fn run_app(
     state.player.artwork_key = initial_artwork_key;
 
     // Apply the initial state fetched before raw mode
-    apply_fresh_state(&mut state, &mut current_artwork, &initial_state, &picker, &tx, &backend);
+    apply_fresh_state(
+        &mut state,
+        &mut current_artwork,
+        &initial_state,
+        &picker,
+        &tx,
+        &backend,
+    );
     state.library.playlists = initial_playlists;
     let mut last_position_update = Instant::now();
 
@@ -265,10 +274,7 @@ fn run_app(
         // Bridge thread: forward backend notifications to AppEvent channel
         std::thread::spawn(move || {
             for info in notify_rx {
-                if tx_notify
-                    .send(AppEvent::MusicNotification(info))
-                    .is_err()
-                {
+                if tx_notify.send(AppEvent::MusicNotification(info)).is_err() {
                     break;
                 }
             }
@@ -414,7 +420,8 @@ fn run_app(
                             let tx2 = tx.clone();
                             std::thread::spawn(move || {
                                 if let Err(_) = lastfm::now_playing(&artist, &track, &album, dur) {
-                                    let _ = tx2.send(AppEvent::LastfmScrobbleResult(Err(String::new())));
+                                    let _ = tx2
+                                        .send(AppEvent::LastfmScrobbleResult(Err(String::new())));
                                 }
                             });
                         }
@@ -440,11 +447,21 @@ fn run_app(
                 }
                 AppEvent::StateRefreshed(fresh) => {
                     let was_not_running = !state.player.music_running;
-                    apply_fresh_state(&mut state, &mut current_artwork, &fresh, &picker, &tx, &backend);
+                    apply_fresh_state(
+                        &mut state,
+                        &mut current_artwork,
+                        &fresh,
+                        &picker,
+                        &tx,
+                        &backend,
+                    );
                     last_position_update = Instant::now();
 
                     // When music service transitions to running, load playlists
-                    if was_not_running && state.player.music_running && state.library.playlists.is_empty() {
+                    if was_not_running
+                        && state.player.music_running
+                        && state.library.playlists.is_empty()
+                    {
                         let tx2 = tx.clone();
                         let b = backend.clone();
                         std::thread::spawn(move || {
@@ -592,7 +609,6 @@ fn query_cell_pixel_size(terminal: &Terminal<CrosstermBackend<io::Stdout>>) -> (
     let _ = terminal;
     (8, 16)
 }
-
 
 // Config
 

@@ -14,9 +14,9 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::artwork::{ArtCtx, Artwork, KittyArt};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use image::ImageReader;
-use crate::artwork::{ArtCtx, Artwork, KittyArt};
 
 use crate::backend::{self, MusicBackend};
 use crate::playlist;
@@ -65,7 +65,12 @@ pub fn normalize_nav_key(key: &KeyEvent, vim_letters: bool) -> KeyCode {
 }
 
 /// Navigate a list selection with scroll tracking. Returns (new_selected, new_scroll).
-pub fn list_nav(code: KeyCode, selected: usize, scroll: usize, len: usize) -> Option<(usize, usize)> {
+pub fn list_nav(
+    code: KeyCode,
+    selected: usize,
+    scroll: usize,
+    len: usize,
+) -> Option<(usize, usize)> {
     if len == 0 {
         return None;
     }
@@ -99,9 +104,7 @@ pub fn filter_track_indices(tracks: &[backend::PlaylistTrack], query: &str) -> V
     tracks
         .iter()
         .enumerate()
-        .filter(|(_, t)| {
-            t.name.to_lowercase().contains(&q) || t.artist.to_lowercase().contains(&q)
-        })
+        .filter(|(_, t)| t.name.to_lowercase().contains(&q) || t.artist.to_lowercase().contains(&q))
         .map(|(i, _)| i)
         .collect()
 }
@@ -219,11 +222,9 @@ pub fn handle_notification(
                     .track
                     .as_ref()
                     .map_or(false, |t| t.name == info.name && t.artist == info.artist);
-            let near_end = state
-                .player
-                .track
-                .as_ref()
-                .map_or(false, |t| t.duration > 0.0 && (t.duration - t.position) < 5.0);
+            let near_end = state.player.track.as_ref().map_or(false, |t| {
+                t.duration > 0.0 && (t.duration - t.position) < 5.0
+            });
 
             // Snap position to duration so progress bar shows completion.
             if is_same_track && near_end {
@@ -246,12 +247,14 @@ pub fn handle_notification(
             // Spotify manages its own queue natively — no intervention needed.
             if was_playing && is_same_track && near_end && backend.needs_queue_advance() {
                 let playing_idx = state.queue.playing.unwrap_or(state.queue.selected);
-                if !state.queue.tracks.is_empty()
-                    && playing_idx + 1 < state.queue.tracks.len()
-                {
+                if !state.queue.tracks.is_empty() && playing_idx + 1 < state.queue.tracks.len() {
                     let next_idx = playing_idx + 1;
                     state.queue.playing = Some(next_idx);
-                    playlist::save_queue_state(&state.queue.playlist_name, next_idx, state.queue.tracks.len());
+                    playlist::save_queue_state(
+                        &state.queue.playlist_name,
+                        next_idx,
+                        state.queue.tracks.len(),
+                    );
                     if state.queue.selected == playing_idx {
                         state.queue.selected = next_idx;
                     }
@@ -402,7 +405,9 @@ pub fn handle_key(
             state.active_tab = Tab::Lyrics;
             return false;
         }
-        KeyCode::Char('/') if state.active_tab != Tab::Queue && state.active_tab != Tab::Library => {
+        KeyCode::Char('/')
+            if state.active_tab != Tab::Queue && state.active_tab != Tab::Library =>
+        {
             state.active_tab = Tab::Search;
             state.search.editing = true;
             return false;
@@ -511,9 +516,7 @@ pub fn handle_key(
             if let Some(track) = state.player.track.clone() {
                 if !track.album.is_empty() {
                     let b = backend.clone();
-                    std::thread::spawn(move || {
-                        b.reveal_album(&track.album, &track.artist)
-                    });
+                    std::thread::spawn(move || b.reveal_album(&track.album, &track.artist));
                 }
             }
             return false;
@@ -566,9 +569,18 @@ fn handle_queue_key(
     let filtered = filter_track_indices(&state.queue.tracks, &state.filter.query);
     let has_filter = !state.filter.query.is_empty();
 
-    let nav_len = if has_filter { filtered.len() } else { state.queue.tracks.len() };
+    let nav_len = if has_filter {
+        filtered.len()
+    } else {
+        state.queue.tracks.len()
+    };
     let vim_nav = !state.filter.active;
-    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, vim_nav), state.queue.selected, state.queue.scroll, nav_len) {
+    if let Some((sel, scr)) = list_nav(
+        normalize_nav_key(&key, vim_nav),
+        state.queue.selected,
+        state.queue.scroll,
+        nav_len,
+    ) {
         state.queue.selected = sel;
         state.queue.scroll = scr;
         return;
@@ -591,9 +603,15 @@ fn handle_queue_key(
             };
             if let Some(idx) = real_idx {
                 state.queue.playing = Some(idx);
-                playlist::save_queue_state(&state.queue.playlist_name, idx, state.queue.tracks.len());
+                playlist::save_queue_state(
+                    &state.queue.playlist_name,
+                    idx,
+                    state.queue.tracks.len(),
+                );
                 let playlist = state.queue.playlist_name.clone();
-                fire_and_refresh(backend, tx, move |b| b.play_track_in_playlist(&playlist, idx));
+                fire_and_refresh(backend, tx, move |b| {
+                    b.play_track_in_playlist(&playlist, idx)
+                });
                 state.filter.active = false;
             }
         }
@@ -615,7 +633,8 @@ fn handle_queue_key(
                     playlist::clear_queue_state();
                     clear_filter(state);
                 } else {
-                    let new_filtered = filter_track_indices(&state.queue.tracks, &state.filter.query);
+                    let new_filtered =
+                        filter_track_indices(&state.queue.tracks, &state.filter.query);
                     if state.queue.selected >= new_filtered.len() && !new_filtered.is_empty() {
                         state.queue.selected = new_filtered.len() - 1;
                     }
@@ -627,7 +646,11 @@ fn handle_queue_key(
                         }
                     }
                     let persist_idx = state.queue.playing.unwrap_or(0);
-                    playlist::save_queue_state(&state.queue.playlist_name, persist_idx, state.queue.tracks.len());
+                    playlist::save_queue_state(
+                        &state.queue.playlist_name,
+                        persist_idx,
+                        state.queue.tracks.len(),
+                    );
                 }
             }
         }
@@ -690,9 +713,18 @@ fn handle_library_key(
     match state.library.sub_view.clone() {
         LibrarySubView::Playlists => {
             let filtered = filter_string_indices(&state.library.playlists, &state.filter.query);
-            let nav_len = if has_filter { filtered.len() } else { state.library.playlists.len() };
+            let nav_len = if has_filter {
+                filtered.len()
+            } else {
+                state.library.playlists.len()
+            };
             let vim_nav = !state.filter.active;
-            if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, vim_nav), state.library.selected, state.library.scroll, nav_len) {
+            if let Some((sel, scr)) = list_nav(
+                normalize_nav_key(&key, vim_nav),
+                state.library.selected,
+                state.library.scroll,
+                nav_len,
+            ) {
                 state.library.selected = sel;
                 state.library.scroll = scr;
                 return;
@@ -790,9 +822,18 @@ fn handle_library_key(
         }
         LibrarySubView::Tracks(ref playlist_name) => {
             let filtered = filter_track_indices(&state.library.tracks, &state.filter.query);
-            let nav_len = if has_filter { filtered.len() } else { state.library.tracks.len() };
+            let nav_len = if has_filter {
+                filtered.len()
+            } else {
+                state.library.tracks.len()
+            };
             let vim_nav = !state.filter.active;
-            if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, vim_nav), state.library.tracks_selected, state.library.tracks_scroll, nav_len) {
+            if let Some((sel, scr)) = list_nav(
+                normalize_nav_key(&key, vim_nav),
+                state.library.tracks_selected,
+                state.library.tracks_scroll,
+                nav_len,
+            ) {
                 state.library.tracks_selected = sel;
                 state.library.tracks_scroll = scr;
                 return;
@@ -845,7 +886,8 @@ fn handle_library_key(
                         let b = backend.clone();
                         std::thread::spawn(move || b.remove_from_playlist(&name, idx));
                         state.library.tracks.remove(idx);
-                        let new_filtered = filter_track_indices(&state.library.tracks, &state.filter.query);
+                        let new_filtered =
+                            filter_track_indices(&state.library.tracks, &state.filter.query);
                         if state.library.tracks_selected >= new_filtered.len()
                             && !new_filtered.is_empty()
                         {
@@ -897,7 +939,12 @@ fn handle_search_key(
             _ => {}
         }
     } else {
-        if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, true), state.search.selected, state.search.scroll, state.search.results.len()) {
+        if let Some((sel, scr)) = list_nav(
+            normalize_nav_key(&key, true),
+            state.search.selected,
+            state.search.scroll,
+            state.search.results.len(),
+        ) {
             state.search.selected = sel;
             state.search.scroll = scr;
             return;
@@ -911,7 +958,9 @@ fn handle_search_key(
                     && state.search.selected < state.search.results.len()
                 {
                     let result = state.search.results[state.search.selected].clone();
-                    fire_and_refresh(backend, tx, move |b| b.play_track(&result.name, &result.artist));
+                    fire_and_refresh(backend, tx, move |b| {
+                        b.play_track(&result.name, &result.artist)
+                    });
                 }
             }
             KeyCode::Backspace => {
@@ -962,7 +1011,12 @@ fn handle_lyrics_key(key: KeyEvent, state: &mut AppState) {
 }
 
 fn handle_theme_picker_key(key: KeyEvent, state: &mut AppState, theme: &mut Theme) {
-    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, true), state.theme.selected, state.theme.scroll, state.theme.all.len()) {
+    if let Some((sel, scr)) = list_nav(
+        normalize_nav_key(&key, true),
+        state.theme.selected,
+        state.theme.scroll,
+        state.theme.all.len(),
+    ) {
         state.theme.selected = sel;
         state.theme.scroll = scr;
         preview_theme(state, theme);
@@ -991,7 +1045,12 @@ fn handle_playlist_picker_key(
     _tx: &mpsc::Sender<AppEvent>,
     backend: &Arc<dyn MusicBackend>,
 ) {
-    if let Some((sel, scr)) = list_nav(normalize_nav_key(&key, true), state.overlays.playlist_picker_selected, state.overlays.playlist_picker_scroll, state.library.playlists.len()) {
+    if let Some((sel, scr)) = list_nav(
+        normalize_nav_key(&key, true),
+        state.overlays.playlist_picker_selected,
+        state.overlays.playlist_picker_scroll,
+        state.library.playlists.len(),
+    ) {
         state.overlays.playlist_picker_selected = sel;
         state.overlays.playlist_picker_scroll = scr;
         return;
@@ -1030,11 +1089,7 @@ fn restore_saved_theme(state: &AppState, theme: &mut Theme) {
 
 // MARK: - Background-thread helpers
 
-fn perform_search(
-    state: &AppState,
-    tx: &mpsc::Sender<AppEvent>,
-    backend: &Arc<dyn MusicBackend>,
-) {
+fn perform_search(state: &AppState, tx: &mpsc::Sender<AppEvent>, backend: &Arc<dyn MusicBackend>) {
     let query = state.search.query.clone();
     if query.len() < 2 {
         return;

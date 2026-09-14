@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, BorderType, Clear, List, ListItem, ListState, Paragraph, Tabs},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Tabs},
     Frame,
 };
 use ratatui_image::StatefulImage;
@@ -45,7 +45,9 @@ fn apply_lyrics_autoscroll(state: &mut AppState, effective_position: Option<f64>
     if !state.lyrics.synced || state.lyrics.manual_scroll {
         return;
     }
-    let Some(pos) = effective_position else { return };
+    let Some(pos) = effective_position else {
+        return;
+    };
     let current_idx = state
         .lyrics
         .lines
@@ -70,6 +72,14 @@ fn do_draw(
 ) -> Option<KittyPlacement> {
     let area = f.area();
 
+    // Paint the complete frame with the theme background first. Without this,
+    // ratatui leaves the terminal profile's background visible and shared
+    // themes collapse to foreground colors only.
+    f.render_widget(
+        Block::default().style(Style::default().bg(theme.background)),
+        area,
+    );
+
     let box_w = if state.ui_width == 0 {
         area.width
     } else {
@@ -88,10 +98,13 @@ fn do_draw(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(theme.border))
+        .style(Style::default().bg(theme.background))
+        .border_style(Style::default().fg(theme.border).bg(theme.background))
         .title(Span::styled(
             "  muse ♫ ",
-            Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
         ));
 
     f.render_widget(block, inner);
@@ -103,7 +116,7 @@ fn do_draw(
         Constraint::Length(player_height(state)),
         Constraint::Length(1), // tab bar
         Constraint::Length(1), // gap below tab bar
-        Constraint::Min(3),   // tab content
+        Constraint::Min(3),    // tab content
         Constraint::Length(1), // help line
     ])
     .split(content_area);
@@ -116,6 +129,13 @@ fn do_draw(
     draw_help_line(f, chunks[4], state, theme);
 
     kitty_placement
+}
+
+fn selected_style(theme: &Theme) -> Style {
+    Style::default()
+        .fg(theme.selection)
+        .bg(theme.cursor_bg)
+        .add_modifier(Modifier::BOLD)
 }
 
 fn player_height(state: &AppState) -> u16 {
@@ -240,11 +260,8 @@ fn draw_player_section(
     // Artist — Album
     let subtitle = format!("{} — {}", track.artist, track.album);
     f.render_widget(
-        Paragraph::new(Span::styled(
-            subtitle,
-            Style::default().fg(theme.time_text),
-        ))
-        .alignment(Alignment::Center),
+        Paragraph::new(Span::styled(subtitle, Style::default().fg(theme.time_text)))
+            .alignment(Alignment::Center),
         rows[2],
     );
 
@@ -257,8 +274,7 @@ fn draw_player_section(
     };
     let elapsed_str = format!("{} ", format_time(display_position));
     let total_str = format!(" {}", format_time(track.duration));
-    let bar_width = (rows[4].width as usize)
-        .saturating_sub(elapsed_str.len() + total_str.len());
+    let bar_width = (rows[4].width as usize).saturating_sub(elapsed_str.len() + total_str.len());
     let filled_count = ((bar_width as f64) * progress).round() as usize;
     let unfilled_count = bar_width.saturating_sub(filled_count);
 
@@ -341,6 +357,11 @@ fn draw_tab_bar(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     let tabs = Tabs::new(titles)
         .select(selected)
         .divider(Span::styled("  ", Style::default().fg(theme.text_muted)))
+        .highlight_style(
+            Style::default()
+                .fg(theme.selection)
+                .add_modifier(Modifier::BOLD),
+        )
         .style(Style::default().fg(theme.text));
 
     f.render_widget(tabs, area);
@@ -394,9 +415,12 @@ fn draw_error_overlay(f: &mut Frame, area: Rect, msg: &str, theme: &Theme) {
     f.render_widget(Clear, popup);
 
     let block = Block::default()
+        .style(Style::default().bg(theme.cursor_bg))
         .title(Span::styled(
             " Error ",
-            Style::default().fg(theme.error).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.error)
+                .add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -412,24 +436,37 @@ fn draw_error_overlay(f: &mut Frame, area: Rect, msg: &str, theme: &Theme) {
     body.push(Line::from(""));
     body.push(Line::from(Span::styled(
         "press any key to dismiss",
-        Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM),
+        Style::default()
+            .fg(theme.text_dim)
+            .add_modifier(Modifier::DIM),
     )));
 
-    f.render_widget(
-        Paragraph::new(body).alignment(Alignment::Center),
-        inner,
-    );
+    f.render_widget(Paragraph::new(body).alignment(Alignment::Center), inner);
 }
 
 fn draw_filter_bar(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     let line = Line::from(vec![
-        Span::styled("/ ", Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "/ ",
+            Style::default().fg(theme.key).add_modifier(Modifier::BOLD),
+        ),
         if state.filter.active {
-            Span::styled(format!("{}▏", state.filter.query), Style::default().fg(theme.accent))
+            Span::styled(
+                format!("{}▏", state.filter.query),
+                Style::default().fg(theme.accent),
+            )
         } else {
-            Span::styled(state.filter.query.clone(), Style::default().fg(theme.accent))
+            Span::styled(
+                state.filter.query.clone(),
+                Style::default().fg(theme.accent),
+            )
         },
-        Span::styled("  Esc to clear", Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM)),
+        Span::styled(
+            "  Esc to clear",
+            Style::default()
+                .fg(theme.text_dim)
+                .add_modifier(Modifier::DIM),
+        ),
     ]);
     f.render_widget(Paragraph::new(line), area);
 }
@@ -460,8 +497,14 @@ fn draw_queue(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     // Build filtered indices
     let filtered: Vec<usize> = if !state.filter.query.is_empty() {
         let q = state.filter.query.to_lowercase();
-        state.queue.tracks.iter().enumerate()
-            .filter(|(_, t)| t.name.to_lowercase().contains(&q) || t.artist.to_lowercase().contains(&q))
+        state
+            .queue
+            .tracks
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| {
+                t.name.to_lowercase().contains(&q) || t.artist.to_lowercase().contains(&q)
+            })
             .map(|(i, _)| i)
             .collect()
     } else {
@@ -470,8 +513,11 @@ fn draw_queue(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
 
     if filtered.is_empty() && has_filter {
         f.render_widget(
-            Paragraph::new(Span::styled("No matches", Style::default().fg(theme.text_dim)))
-                .alignment(Alignment::Center),
+            Paragraph::new(Span::styled(
+                "No matches",
+                Style::default().fg(theme.text_dim),
+            ))
+            .alignment(Alignment::Center),
             list_area,
         );
         return;
@@ -494,9 +540,7 @@ fn draw_queue(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
             let dur = format_time(t.duration);
             let entry = format!("{}{} — {}", marker, t.name, t.artist);
             let style = if is_selected {
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD)
+                selected_style(theme)
             } else if is_playing {
                 Style::default()
                     .fg(theme.text_bright)
@@ -534,10 +578,15 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
             }
 
             let (list_area, filtered) = if has_filter {
-                let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
+                let rows =
+                    Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
                 draw_filter_bar(f, rows[0], state, theme);
                 let q = state.filter.query.to_lowercase();
-                let indices: Vec<usize> = state.library.playlists.iter().enumerate()
+                let indices: Vec<usize> = state
+                    .library
+                    .playlists
+                    .iter()
+                    .enumerate()
                     .filter(|(_, s)| s.to_lowercase().contains(&q))
                     .map(|(i, _)| i)
                     .collect();
@@ -548,8 +597,11 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
 
             if filtered.is_empty() && has_filter {
                 f.render_widget(
-                    Paragraph::new(Span::styled("No matches", Style::default().fg(theme.text_dim)))
-                        .alignment(Alignment::Center),
+                    Paragraph::new(Span::styled(
+                        "No matches",
+                        Style::default().fg(theme.text_dim),
+                    ))
+                    .alignment(Alignment::Center),
                     list_area,
                 );
                 return;
@@ -566,9 +618,7 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
                         "  "
                     };
                     let style = if display_idx == state.library.selected {
-                        Style::default()
-                            .fg(theme.accent)
-                            .add_modifier(Modifier::BOLD)
+                        selected_style(theme)
                     } else {
                         Style::default().fg(theme.text)
                     };
@@ -618,8 +668,15 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
             } else {
                 let filtered: Vec<usize> = if !state.filter.query.is_empty() {
                     let q = state.filter.query.to_lowercase();
-                    state.library.tracks.iter().enumerate()
-                        .filter(|(_, t)| t.name.to_lowercase().contains(&q) || t.artist.to_lowercase().contains(&q))
+                    state
+                        .library
+                        .tracks
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, t)| {
+                            t.name.to_lowercase().contains(&q)
+                                || t.artist.to_lowercase().contains(&q)
+                        })
                         .map(|(i, _)| i)
                         .collect()
                 } else {
@@ -628,8 +685,11 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
 
                 if filtered.is_empty() && has_filter {
                     f.render_widget(
-                        Paragraph::new(Span::styled("No matches", Style::default().fg(theme.text_dim)))
-                            .alignment(Alignment::Center),
+                        Paragraph::new(Span::styled(
+                            "No matches",
+                            Style::default().fg(theme.text_dim),
+                        ))
+                        .alignment(Alignment::Center),
                         list_area,
                     );
                     return;
@@ -647,9 +707,7 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
                         };
                         let dur = format_time(t.duration);
                         let style = if display_idx == state.library.tracks_selected {
-                            Style::default()
-                                .fg(theme.accent)
-                                .add_modifier(Modifier::BOLD)
+                            selected_style(theme)
                         } else {
                             Style::default().fg(theme.text)
                         };
@@ -663,8 +721,7 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
                     })
                     .collect();
 
-                let mut list_state =
-                    ListState::default().with_offset(state.library.tracks_scroll);
+                let mut list_state = ListState::default().with_offset(state.library.tracks_scroll);
                 f.render_stateful_widget(List::new(items), list_area, &mut list_state);
             }
         }
@@ -672,20 +729,44 @@ fn draw_library(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
 }
 
 fn draw_search(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
-    let rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(1)]).split(area);
+    let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(1),
+    ])
+    .split(area);
 
     // Search input — accent color + cursor when editing, dimmed when browsing
     if state.search.editing {
         let search_line = Line::from(vec![
-            Span::styled("/ ", Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)),
-            Span::styled(format!("{}▏", state.search.query), Style::default().fg(theme.accent)),
-            Span::styled("  Enter to browse · Esc to stop", Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM)),
+            Span::styled(
+                "/ ",
+                Style::default().fg(theme.key).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{}▏", state.search.query),
+                Style::default().fg(theme.accent),
+            ),
+            Span::styled(
+                "  Enter to browse · Esc to stop",
+                Style::default()
+                    .fg(theme.text_dim)
+                    .add_modifier(Modifier::DIM),
+            ),
         ]);
         f.render_widget(Paragraph::new(search_line), rows[0]);
     } else {
         let search_line = Line::from(vec![
-            Span::styled(format!("/ {}", state.search.query), Style::default().fg(theme.text_dim)),
-            Span::styled("  / to edit", Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM)),
+            Span::styled(
+                format!("/ {}", state.search.query),
+                Style::default().fg(theme.text_dim),
+            ),
+            Span::styled(
+                "  / to edit",
+                Style::default()
+                    .fg(theme.text_dim)
+                    .add_modifier(Modifier::DIM),
+            ),
         ]);
         f.render_widget(Paragraph::new(search_line), rows[0]);
     }
@@ -719,9 +800,7 @@ fn draw_search(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
                 // Editing: dim all results to show focus is on the search bar
                 Style::default().fg(theme.text_dim)
             } else if i == state.search.selected {
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD)
+                selected_style(theme)
             } else {
                 Style::default().fg(theme.text)
             };
@@ -798,7 +877,13 @@ fn draw_lyrics(
 
 fn draw_theme_picker(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     // Size the popup to fit content with padding
-    let max_name_len = state.theme.all.iter().map(|(n, _)| n.len()).max().unwrap_or(10);
+    let max_name_len = state
+        .theme
+        .all
+        .iter()
+        .map(|(n, _)| n.len())
+        .max()
+        .unwrap_or(10);
     let popup_w = (max_name_len as u16 + 8).min(area.width.saturating_sub(4)); // "▸ " + name + " ✓" + padding
     let popup_h = (state.theme.all.len() as u16 + 2).min(area.height.saturating_sub(2)); // +2 for border
 
@@ -810,6 +895,7 @@ fn draw_theme_picker(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme)
     f.render_widget(Clear, popup);
 
     let block = Block::default()
+        .style(Style::default().bg(theme.background))
         .title(Span::styled(
             " Themes ",
             Style::default()
@@ -834,11 +920,13 @@ fn draw_theme_picker(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme)
             } else {
                 "  "
             };
-            let check = if *name == state.theme.name { " ✓" } else { "" };
+            let check = if *name == state.theme.name {
+                " ✓"
+            } else {
+                ""
+            };
             let style = if i == state.theme.selected {
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD)
+                selected_style(theme)
             } else {
                 Style::default().fg(theme.text)
             };
@@ -894,9 +982,7 @@ fn draw_help_overlay(f: &mut Frame, area: Rect, theme: &Theme) {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{:<20}", key),
-                Style::default()
-                    .fg(theme.text_bright)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(theme.key).add_modifier(Modifier::BOLD),
             ),
             Span::styled(*desc, Style::default().fg(theme.text)),
         ]));
@@ -917,7 +1003,12 @@ fn draw_help_overlay(f: &mut Frame, area: Rect, theme: &Theme) {
     f.render_widget(title, Rect::new(area.x, area.y, area.width, 1));
 
     // Bindings left-aligned in centered block, offset past title + blank line
-    let bindings_area = Rect::new(centered.x, centered.y + 2, centered.width, centered.height.saturating_sub(2));
+    let bindings_area = Rect::new(
+        centered.x,
+        centered.y + 2,
+        centered.width,
+        centered.height.saturating_sub(2),
+    );
     let p = Paragraph::new(lines[2..].to_vec());
     f.render_widget(p, bindings_area);
 }
@@ -960,9 +1051,7 @@ fn draw_playlist_picker(f: &mut Frame, area: Rect, state: &AppState, theme: &The
                 "  "
             };
             let style = if i == state.overlays.playlist_picker_selected {
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD)
+                selected_style(theme)
             } else {
                 Style::default().fg(theme.text)
             };
@@ -986,16 +1075,30 @@ fn draw_help_line(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
         f.render_widget(
             Paragraph::new(Span::styled(
                 left,
-                Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(theme.text_dim)
+                    .add_modifier(Modifier::DIM),
             )),
             area,
         );
     } else {
-        let padding = area.width as usize - left.len().min(area.width as usize) - right.len().min(area.width as usize);
+        let padding = area.width as usize
+            - left.len().min(area.width as usize)
+            - right.len().min(area.width as usize);
         let line = Line::from(vec![
-            Span::styled(left, Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM)),
+            Span::styled(
+                left,
+                Style::default()
+                    .fg(theme.text_dim)
+                    .add_modifier(Modifier::DIM),
+            ),
             Span::raw(" ".repeat(padding.max(1))),
-            Span::styled(right.as_str(), Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM)),
+            Span::styled(
+                right.as_str(),
+                Style::default()
+                    .fg(theme.text_dim)
+                    .add_modifier(Modifier::DIM),
+            ),
         ]);
         f.render_widget(Paragraph::new(line), area);
     }

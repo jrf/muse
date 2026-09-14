@@ -54,7 +54,7 @@ Single file exporting ~40 `@_cdecl` functions. Controls Music.app via AppleScrip
 - **`state.rs`** — `AppState` decomposed into per-concern sub-structs: `PlayerData`, `QueueData`, `LibraryData`, `SearchData`, `LyricsData`, `ThemeData`, `OverlayData`, `FilterData`. Top-level fields are config (`ui_width`, `show_artwork`, `lyrics_enabled`), active tab, and `lastfm_status`.
 - **`playlist.rs`** — Apple Music-specific queue state persistence and CLI playlist-aware next/prev. Not used by Spotify backend.
 - **`lastfm.rs`** — Last.fm scrobbling via external `muse-scrobble` CLI. `ScrobbleTracker` tracks play timing in-process (50% or 4min threshold).
-- **`theme.rs`** — Theme loading from TOML config files (`~/.config/muse/themes/*.toml`). Default themes are embedded via `include_str!` from `themes/` and written to disk on first run. Supports 256-color indexed palette and hex RGB colors.
+- **`theme.rs`** — Loads the selected theme and explicit picker catalog from configured file paths. Shared theme files define named `[colors]` and semantic `[ui]` roles. Muse consumes background, cursor_bg, border, accent, selection, key, text variants, heading, and error; values may be 256-color indices or hex RGB colors.
 
 ### Legacy Swift Frontend (`Sources/`)
 
@@ -91,7 +91,7 @@ client_id = "YOUR_ID"            # required if backend = "spotify"
 
 Legacy plain-text `KEY=VALUE` configs (old `config` file) are auto-migrated to TOML on first read.
 
-Themes directory: `~/.config/muse/themes/` — TOML files with `[colors]` table (border, accent, text, text_bright, text_dim, text_muted, time_text, error). Values are 256-color indices (integers) or hex RGB strings (`"#82aaff"`). Default themes embedded in `themes/` dir are written on first run.
+Themes are loaded from the path in `theme` and the explicit paths listed by `theme_catalog`; muse does not scan a directory. Theme TOML uses named `[colors]` and semantic `[ui]` roles: background, cursor_bg, border, accent, selection, key, text, text_bright, text_dim, text_muted, heading, and error. Values are 256-color indices, hex RGB strings (`"#82aaff"`), or named-color references.
 
 ## Workflow
 
