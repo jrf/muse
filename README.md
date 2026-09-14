@@ -50,7 +50,8 @@ Config file: `~/.config/muse/config.toml`
 
 ```toml
 backend = "spotify"              # optional, default is "apple_music"
-theme = "synthwave"              # color theme (filename without .toml)
+theme = "~/.config/themes/tokyo-night-moon.toml"
+theme_catalog = "~/.config/themes/catalog.toml"
 default_tab = "queue"            # tab shown on launch: queue, library, search, lyrics
 ui_width = 120                   # max UI width in columns (min 40, or "auto")
 show_artwork = true              # display album art (requires sixel/kitty/iTerm2)
@@ -63,7 +64,7 @@ client_id = "YOUR_ID"            # required if backend = "spotify"
 
 ### Custom Themes
 
-Themes live in `~/.config/muse/themes/` as TOML files. Six defaults are included (synthwave, monochrome, ocean, sunset, matrix, tokyo-night-moon). To create a custom theme, add a `.toml` file:
+`theme` is loaded directly at startup. `theme_catalog` contains a `themes = [...]` array of explicit file paths used by the picker. Muse never scans a theme directory. Picker changes apply to the current session only and never rewrite `config.toml`; edit `theme` directly to change the startup theme. A theme file can use:
 
 ```toml
 [colors]
@@ -135,13 +136,15 @@ Launch `muse` in any terminal. The player panel at the top always shows the curr
 - **Search** — type to search your library. Results appear as you type (minimum 2 characters). Enter plays the selected result.
 - **Lyrics** — displays lyrics for the current track. Fetched from [LRCLIB](https://lrclib.net) (falls back to embedded lyrics if available). Scroll with arrow keys. Shows "No lyrics available" when none are found.
 
-Press `t` from any tab to open the theme picker overlay. Navigate with arrow keys, preview live, and press Enter to apply. Themes are loaded from `~/.config/muse/themes/` as TOML files. Default themes are written on first run. Add your own by creating a new `.toml` file in that directory.
+Press `t` from any tab to open the theme picker overlay. Navigate with arrow keys, preview live, and press Enter to apply for the current session. Picker entries come only from the configured catalog.
 
 Playback controls (`space`, `n`, `p`, `+`/`-`, `s`, `r`) work from any tab. In the Search tab or while filtering, letter keys are captured for typing, so `n`/`p`/`s`/`r`/`a` only work as playback controls from the other tabs.
 
 ### Album Art
 
-Album art is displayed automatically in terminals that support sixel, kitty, or iTerm2 graphics (Kitty, Ghostty, WezTerm, iTerm2, foot, etc.). Detection uses the terminal's capability query.
+Album art is displayed automatically in terminals that support sixel, kitty, or iTerm2 graphics (Kitty, Ghostty, WezTerm, iTerm2, foot, Konsole, etc.). Detection uses the terminal's capability query.
+
+For the Kitty graphics protocol, muse uses its own **direct-placement** (`a=T`) renderer rather than the Unicode-placeholder method. This is what makes album art work correctly in **WezTerm**, which advertises Kitty support but does not render Kitty Unicode placeholders (they'd otherwise show up as a grid of stray glyphs). The direct-placement path also works in Kitty, Ghostty, and Konsole.
 
 If auto-detection picks the wrong protocol for your terminal (or you want to force a specific one — e.g. nested tmux often blocks the query), set `image_protocol` in `config.toml`:
 

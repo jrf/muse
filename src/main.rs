@@ -1,3 +1,4 @@
+mod artwork;
 mod backend;
 #[cfg(all(feature = "apple-music", target_os = "macos"))]
 mod bridge;
@@ -23,6 +24,7 @@ use crossterm::{
 use ratatui::prelude::*;
 use ratatui_image::picker::{Picker, ProtocolType};
 
+use artwork::{ArtCtx, Artwork, KittyPlacement, KITTY_DELETE_ALL};
 use backend::MusicBackend;
 use handlers::{apply_fresh_state, fetch_artwork, handle_key, handle_notification, AppEvent};
 use state::{AppState, LibrarySubView, Tab};
@@ -108,7 +110,7 @@ fn main() -> io::Result<()> {
     // capability query doesn't make it through (e.g. nested tmux).
     let mut startup_error: Option<String> = None;
     let configured_protocol = load_image_protocol();
-    let picker = if show_artwork {
+    let art_ctx = if show_artwork {
         let mut p = match Picker::from_query_stdio() {
             Ok(p) => p,
             Err(e) => {
@@ -130,14 +132,20 @@ fn main() -> io::Result<()> {
                 }
             }
         }
-        Some(p)
+        // When the selected protocol is Kitty we use our own direct-placement
+        // encoder instead of ratatui-image, because ratatui-image's Kitty
+        // backend uses Unicode placeholders that some terminals (notably
+        // WezTerm) don't render. Direct placement (a=T) works everywhere the
+        // Kitty protocol is supported.
+        let kitty = p.protocol_type() == ProtocolType::Kitty;
+        Some(Arc::new(ArtCtx { picker: p, kitty }))
     } else {
         None
     };
 
     // Fetch initial artwork before raw mode
-    let initial_artwork = if let (Some(_), Some(ref picker)) = (&initial_state.track, &picker) {
-        fetch_artwork(picker, &*backend)
+    let initial_artwork = if let (Some(_), Some(ref ctx)) = (&initial_state.track, &art_ctx) {
+        fetch_artwork(ctx, &*backend)
     } else {
         None
     };
@@ -156,7 +164,7 @@ fn main() -> io::Result<()> {
 
     let result = run_app(
         &mut terminal,
-        picker,
+        art_ctx,
         initial_state,
         initial_playlists,
         initial_artwork,
@@ -178,10 +186,10 @@ fn main() -> io::Result<()> {
 
 fn run_app(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    picker: Option<Picker>,
+    art_ctx: Option<Arc<ArtCtx>>,
     initial_state: backend::FullState,
     initial_playlists: Vec<String>,
-    initial_artwork: Option<ratatui_image::protocol::StatefulProtocol>,
+    initial_artwork: Option<Artwork>,
     initial_artwork_key: String,
     backend: Arc<dyn MusicBackend>,
     startup_error: Option<String>,
@@ -194,14 +202,18 @@ fn run_app(
     let mut current_theme = theme::default_theme();
     let mut last_refresh = Instant::now();
     let refresh_interval = Duration::from_secs(2);
-    let picker = picker.map(std::sync::Arc::new);
+    let picker = art_ctx;
 
     // Artwork lives outside AppState so ui::draw can hold a stable `&mut`
-    // to it across renders. The kitty graphics protocol relies on the
-    // StatefulProtocol's transmit-once state surviving frame-to-frame; if it
-    // sat inside AppState we'd have to take()/restore it every frame to
-    // satisfy the borrow checker, which broke kitty placeholder rendering.
-    let mut current_artwork: Option<ratatui_image::protocol::StatefulProtocol> = initial_artwork;
+    // to it across renders. The ratatui-image StatefulProtocol relies on its
+    // transmit-once state surviving frame-to-frame; if it sat inside AppState
+    // we'd have to take()/restore it every frame to satisfy the borrow
+    // checker, which broke stateful rendering.
+    let mut current_artwork: Option<Artwork> = initial_artwork;
+    // Bumped whenever `current_artwork` is replaced, so the Kitty emitter can
+    // detect a new image even when the track key is unchanged (e.g. the real
+    // artwork arriving after we briefly showed the previous track's art).
+    let mut artwork_gen: u64 = 0;
 
     // Apply initial artwork key BEFORE apply_fresh_state so it doesn't see a key
     // change and spawn a redundant (possibly failing) background fetch.
@@ -292,6 +304,12 @@ fn run_app(
         }
     });
 
+    // Tracks the currently-displayed hand-rolled Kitty image so we only
+    // (re)transmit when the artwork or its placement changes, not every frame.
+    // A frame that returns no placement while this is Some means the image
+    // must be deleted from the terminal.
+    let mut kitty_shown: Option<(u64, ratatui::layout::Rect)> = None;
+
     let result = 'main_loop: loop {
         // Render — pass elapsed-since-last-position-update to ui::draw so it
         // can interpolate the displayed track position without us cloning
@@ -301,9 +319,20 @@ fn run_app(
         } else {
             0.0
         };
+        let mut placement: Option<KittyPlacement> = None;
         terminal.draw(|f| {
-            ui::draw(f, &mut state, &current_theme, &mut current_artwork, elapsed)
+            placement = ui::draw(f, &mut state, &current_theme, &mut current_artwork, elapsed);
         })?;
+
+        // Emit hand-rolled Kitty graphics after the frame has flushed, so the
+        // escape sequence lands on top of the (cell-skipped) reserved region.
+        emit_kitty_artwork(
+            terminal,
+            &current_artwork,
+            placement,
+            artwork_gen,
+            &mut kitty_shown,
+        )?;
 
         // Wait for events (short timeout to keep rendering smooth)
         match rx.recv_timeout(Duration::from_millis(50)) {
@@ -463,6 +492,7 @@ fn run_app(
                 AppEvent::ArtworkLoaded(key, proto) => {
                     if state.player.artwork_key == key {
                         current_artwork = Some(proto);
+                        artwork_gen = artwork_gen.wrapping_add(1);
                     }
                 }
                 AppEvent::LastfmScrobbleResult(result) => {
@@ -486,7 +516,81 @@ fn run_app(
 
     // Signal background threads to exit promptly before we tear down.
     shutdown.store(true, Ordering::Relaxed);
+    // Remove any lingering Kitty image so it doesn't persist after exit.
+    if kitty_shown.is_some() {
+        use std::io::Write;
+        let mut out = io::stdout();
+        let _ = out.write_all(KITTY_DELETE_ALL.as_bytes());
+        let _ = out.flush();
+    }
     result
+}
+
+/// Emit (or clear) the hand-rolled Kitty album art after a frame is drawn.
+///
+/// `placement` is `Some` when the UI reserved a region for a Kitty image this
+/// frame. We only retransmit the PNG when the artwork identity or its
+/// placement rectangle changed since the last emission; otherwise the image
+/// already sits in the terminal untouched (its cells were skipped by ratatui).
+/// When `placement` is `None` but an image was previously shown, delete it.
+fn emit_kitty_artwork(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    artwork: &Option<Artwork>,
+    placement: Option<KittyPlacement>,
+    artwork_gen: u64,
+    shown: &mut Option<(u64, ratatui::layout::Rect)>,
+) -> io::Result<()> {
+    use crossterm::{cursor::MoveTo, queue};
+    use std::io::Write;
+
+    let art = match (placement, artwork) {
+        (Some(p), Some(Artwork::Kitty(art))) => (p.rect, art),
+        _ => {
+            // No Kitty image this frame; clear any previously shown one.
+            if shown.take().is_some() {
+                let mut out = io::stdout();
+                queue!(out, MoveTo(0, 0))?;
+                out.write_all(KITTY_DELETE_ALL.as_bytes())?;
+                out.flush()?;
+            }
+            return Ok(());
+        }
+    };
+    let (rect, kitty) = art;
+
+    // Skip retransmission if the same image sits in the same place already.
+    if shown.as_ref() == Some(&(artwork_gen, rect)) {
+        return Ok(());
+    }
+
+    let cell_px = query_cell_pixel_size(terminal);
+    let (cols, rows) = kitty.fit(rect.width, rect.height, cell_px);
+    let escape = kitty.transmit_escape(cols, rows);
+
+    let mut out = io::stdout();
+    // Delete the previous placement, then transmit+display the new one at the
+    // reserved region's top-left cell (MoveTo is 0-based; Rect is too).
+    out.write_all(KITTY_DELETE_ALL.as_bytes())?;
+    queue!(out, MoveTo(rect.x, rect.y))?;
+    out.write_all(escape.as_bytes())?;
+    out.flush()?;
+
+    *shown = Some((artwork_gen, rect));
+    Ok(())
+}
+
+/// Query the terminal's per-cell pixel size (width, height). Falls back to a
+/// typical 8x16 when the terminal doesn't report a pixel size.
+fn query_cell_pixel_size(terminal: &Terminal<CrosstermBackend<io::Stdout>>) -> (u16, u16) {
+    if let Ok(ws) = crossterm::terminal::window_size() {
+        if ws.columns > 0 && ws.rows > 0 && ws.width > 0 && ws.height > 0 {
+            let w = (ws.width / ws.columns).max(1);
+            let h = (ws.height / ws.rows).max(1);
+            return (w, h);
+        }
+    }
+    let _ = terminal;
+    (8, 16)
 }
 
 
@@ -555,9 +659,10 @@ fn dirs_or_home() -> std::path::PathBuf {
 
 fn load_config(state: &mut AppState, theme: &mut Theme) {
     let Some(doc) = read_config() else { return };
-    if let Some(name) = doc.get("theme").and_then(|v| v.as_str()) {
-        if let Some((idx, t)) = theme::find_theme(name, &state.theme.all) {
-            state.theme.name = name.to_string();
+    if let Some(path) = doc.get("theme").and_then(|v| v.as_str()) {
+        let name = theme::configured_theme_name(path);
+        if let Some((idx, t)) = theme::find_theme(&name, &state.theme.all) {
+            state.theme.name = name;
             state.theme.selected = idx;
             *theme = t;
         }
@@ -620,4 +725,3 @@ fn load_spotify_client_id() -> Option<String> {
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
 }
-

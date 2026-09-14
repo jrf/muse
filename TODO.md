@@ -42,7 +42,7 @@
 - [x] Queue restored on relaunch from persisted playlist state #feature
 - [x] Reverted auto-advance feature — both backends handle queue advancement natively, `sync_queue_selection` keeps the UI in sync #bug
 - [x] Fix end-of-track stall — call `next_track()` when track finishes but backend doesn't advance on its own #bug
-- [x] External theme files — themes loaded from `~/.config/muse/themes/*.toml` instead of hardcoded in Rust #refactor
+- [x] External theme files — selected theme and picker catalog use explicit paths #refactor
 - [x] TOML config file (`config.toml`) replacing legacy plain-text KEY=VALUE format #refactor
 - [x] Theme picker moved from tab bar to overlay (activated by `t`) #improvement
 - [x] Configurable `default_tab`, `ui_width`, and `show_artwork` in config.toml #feature
@@ -52,7 +52,7 @@
 - [x] Lyrics tab with synced lyrics display and manual scrolling #feature
 - [x] Sixel album artwork in terminal #feature
 - [x] Theme picker tab with live theme selection #feature
-- [x] New color themes: classic, fire, purple #feature
+- [x] New color themes: fire, purple #feature
 - [x] Help overlay (`?`) showing all keybindings #feature
 - [x] Search artist (`a`) and search album (`A`) keybindings #feature
 - [x] Open artist (`o`) and album (`O`) in Music.app #feature

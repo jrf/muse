@@ -7,8 +7,9 @@ use ratatui::{
     widgets::{Block, Borders, BorderType, Clear, List, ListItem, ListState, Paragraph, Tabs},
     Frame,
 };
-use ratatui_image::{StatefulImage, protocol::StatefulProtocol};
+use ratatui_image::StatefulImage;
 
+use crate::artwork::{Artwork, KittyPlacement};
 use crate::backend;
 use crate::state::{AppState, LibrarySubView, Tab};
 use crate::theme::Theme;
@@ -23,12 +24,12 @@ pub fn draw(
     f: &mut Frame,
     state: &mut AppState,
     theme: &Theme,
-    artwork: &mut Option<StatefulProtocol>,
+    artwork: &mut Option<Artwork>,
     elapsed: f64,
-) {
+) -> Option<KittyPlacement> {
     let effective_position = effective_track_position(state, elapsed);
     apply_lyrics_autoscroll(state, effective_position);
-    do_draw(f, state, theme, artwork, effective_position);
+    do_draw(f, state, theme, artwork, effective_position)
 }
 
 fn effective_track_position(state: &AppState, elapsed: f64) -> Option<f64> {
@@ -64,9 +65,9 @@ fn do_draw(
     f: &mut Frame,
     state: &AppState,
     theme: &Theme,
-    artwork: &mut Option<StatefulProtocol>,
+    artwork: &mut Option<Artwork>,
     effective_position: Option<f64>,
-) {
+) -> Option<KittyPlacement> {
     let area = f.area();
 
     let box_w = if state.ui_width == 0 {
@@ -107,11 +108,14 @@ fn do_draw(
     ])
     .split(content_area);
 
-    draw_player_section(f, chunks[0], state, theme, artwork, effective_position);
+    let kitty_placement =
+        draw_player_section(f, chunks[0], state, theme, artwork, effective_position);
     draw_tab_bar(f, chunks[1], state, theme);
     // chunks[2] is the gap (empty)
     draw_tab_content(f, chunks[3], state, theme, effective_position);
     draw_help_line(f, chunks[4], state, theme);
+
+    kitty_placement
 }
 
 fn player_height(state: &AppState) -> u16 {
@@ -129,9 +133,9 @@ fn draw_player_section(
     area: Rect,
     state: &AppState,
     theme: &Theme,
-    artwork: &mut Option<StatefulProtocol>,
+    artwork: &mut Option<Artwork>,
     effective_position: Option<f64>,
-) {
+) -> Option<KittyPlacement> {
     if !state.player.music_running {
         let lines = vec![
             Line::from(Span::styled(
@@ -145,7 +149,7 @@ fn draw_player_section(
         ];
         let p = Paragraph::new(lines).alignment(Alignment::Center);
         f.render_widget(p, area);
-        return;
+        return None;
     }
 
     let Some(track) = &state.player.track else {
@@ -155,7 +159,7 @@ fn draw_player_section(
         ))
         .alignment(Alignment::Center);
         f.render_widget(p, area);
-        return;
+        return None;
     };
 
     // Always reserve space for artwork to prevent layout shifts during track changes.
@@ -179,13 +183,27 @@ fn draw_player_section(
     //
     // We Clear the cells first, matching the ratatui-image `thread.rs`
     // example. Without Clear, the parent Block's border render leaves cell
-    // styling in this area that interferes with the kitty graphics
-    // protocol's unicode placeholders — kitty won't replace placeholder
-    // cells that already have a foreground color from a previous widget.
-    if let (Some(art_rect), Some(proto)) = (art_area, artwork.as_mut()) {
-        f.render_widget(Clear, art_rect);
-        let image = StatefulImage::default();
-        f.render_stateful_widget(image, art_rect, proto);
+    // styling in this area that interferes with graphics protocols.
+    //
+    // For the hand-rolled Kitty path we don't draw a ratatui widget at all:
+    // we mark those cells as skipped (so ratatui's diff doesn't overwrite the
+    // image with blanks) and return a KittyPlacement for the main loop to emit
+    // as an escape sequence after the frame flushes.
+    let mut kitty_placement = None;
+    if let Some(art_rect) = art_area {
+        match artwork.as_mut() {
+            Some(Artwork::Ratatui(proto)) => {
+                f.render_widget(Clear, art_rect);
+                let image = StatefulImage::default();
+                f.render_stateful_widget(image, art_rect, proto);
+            }
+            Some(Artwork::Kitty(_)) => {
+                f.render_widget(Clear, art_rect);
+                mark_skip(f, art_rect);
+                kitty_placement = Some(KittyPlacement { rect: art_rect });
+            }
+            None => {}
+        }
     }
 
     // Text content
@@ -277,6 +295,22 @@ fn draw_player_section(
             .alignment(Alignment::Center),
         rows[6],
     );
+
+    kitty_placement
+}
+
+/// Mark every cell in `rect` as skipped so ratatui's buffer diff leaves them
+/// untouched. This protects a hand-rolled Kitty image drawn into that region
+/// from being overwritten with blanks on subsequent frames.
+fn mark_skip(f: &mut Frame, rect: Rect) {
+    let buf = f.buffer_mut();
+    for y in rect.top()..rect.bottom() {
+        for x in rect.left()..rect.right() {
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                cell.set_skip(true);
+            }
+        }
+    }
 }
 
 fn draw_tab_bar(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {

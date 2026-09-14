@@ -16,8 +16,7 @@ use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use image::ImageReader;
-use ratatui_image::picker::Picker;
-use ratatui_image::protocol::StatefulProtocol;
+use crate::artwork::{ArtCtx, Artwork, KittyArt};
 
 use crate::backend::{self, MusicBackend};
 use crate::playlist;
@@ -36,7 +35,7 @@ pub enum AppEvent {
     PlaylistTracksLoaded(String, Vec<backend::PlaylistTrack>),
     SearchResults(String, Vec<backend::SearchResult>),
     LyricsLoaded(String, Option<backend::LyricsResult>),
-    ArtworkLoaded(String, StatefulProtocol),
+    ArtworkLoaded(String, Artwork),
     LastfmScrobbleResult(Result<(), String>),
 }
 
@@ -129,9 +128,9 @@ fn clear_filter(state: &mut AppState) {
 
 pub fn apply_fresh_state(
     state: &mut AppState,
-    artwork: &mut Option<StatefulProtocol>,
+    artwork: &mut Option<Artwork>,
     fresh: &backend::FullState,
-    picker: &Option<Arc<Picker>>,
+    ctx: &Option<Arc<ArtCtx>>,
     tx: &mpsc::Sender<AppEvent>,
     backend: &Arc<dyn MusicBackend>,
 ) {
@@ -187,13 +186,13 @@ pub fn apply_fresh_state(
     if new_art_key != old_art_key && !new_art_key.is_empty() {
         state.player.artwork_key = new_art_key.clone();
         // Keep old artwork visible until new one arrives — don't set to None
-        if let Some(ref picker) = picker {
+        if let Some(ref ctx) = ctx {
             let tx2 = tx.clone();
-            let picker = picker.clone();
+            let ctx = ctx.clone();
             let b = backend.clone();
             std::thread::spawn(move || {
-                if let Some(proto) = fetch_artwork(&picker, &*b) {
-                    let _ = tx2.send(AppEvent::ArtworkLoaded(new_art_key, proto));
+                if let Some(art) = fetch_artwork(&ctx, &*b) {
+                    let _ = tx2.send(AppEvent::ArtworkLoaded(new_art_key, art));
                 }
             });
         }
@@ -206,7 +205,7 @@ pub fn apply_fresh_state(
 pub fn handle_notification(
     state: &mut AppState,
     info: &backend::NotificationInfo,
-    picker: &Option<Arc<Picker>>,
+    picker: &Option<Arc<ArtCtx>>,
     tx: &mpsc::Sender<AppEvent>,
     backend: &Arc<dyn MusicBackend>,
 ) {
@@ -307,13 +306,13 @@ pub fn handle_notification(
             let new_key = format!("{}\t{}", info.artist, info.album);
             if new_key != state.player.artwork_key {
                 state.player.artwork_key = new_key.clone();
-                if let Some(ref picker) = picker {
+                if let Some(ref ctx) = picker {
                     let tx2 = tx.clone();
-                    let picker = picker.clone();
+                    let ctx = ctx.clone();
                     let b = backend.clone();
                     std::thread::spawn(move || {
-                        if let Some(proto) = fetch_artwork(&picker, &*b) {
-                            let _ = tx2.send(AppEvent::ArtworkLoaded(new_key, proto));
+                        if let Some(art) = fetch_artwork(&ctx, &*b) {
+                            let _ = tx2.send(AppEvent::ArtworkLoaded(new_key, art));
                         }
                     });
                 }
@@ -1048,12 +1047,20 @@ fn perform_search(
     });
 }
 
-pub fn fetch_artwork(picker: &Picker, backend: &dyn MusicBackend) -> Option<StatefulProtocol> {
+pub fn fetch_artwork(ctx: &ArtCtx, backend: &dyn MusicBackend) -> Option<Artwork> {
     for _ in 0..3 {
         if let Some(data) = backend.get_artwork_data() {
             if let Ok(reader) = ImageReader::new(std::io::Cursor::new(data)).with_guessed_format() {
                 if let Ok(img) = reader.decode() {
-                    return Some(picker.new_resize_protocol(img));
+                    if ctx.kitty {
+                        // Hand-rolled Kitty direct-placement path (works in
+                        // WezTerm, unlike ratatui-image's placeholder method).
+                        if let Some(art) = KittyArt::from_image(&img) {
+                            return Some(Artwork::Kitty(art));
+                        }
+                    } else {
+                        return Some(Artwork::Ratatui(ctx.picker.new_resize_protocol(img)));
+                    }
                 }
             }
         }
