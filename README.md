@@ -138,7 +138,8 @@ Launch `muse` in any terminal. The player panel at the top always shows the curr
 | `PgUp` / `PgDn` | Page up / down |
 | `Home` / `End` | Jump to top / bottom |
 | `Enter` | Play track / playlist |
-| Left click | Play a queue track, library playlist/track, or search result |
+| Left click | Switch tabs; toggle shuffle/repeat; seek in the progress bar; play list items |
+| Mouse wheel | Scroll Queue, Library, Search, and Lyrics under the pointer |
 | `→` | Browse playlist tracks (Library) |
 | `Q` | Load playlist into queue without playing (Library) |
 | `/` | Filter list (queue/library) / Search |
@@ -156,7 +157,7 @@ Launch `muse` in any terminal. The player panel at the top always shows the curr
 
 Press `t` from any tab to open the theme picker overlay. Navigate with arrow keys, preview live, and press Enter to apply for the current session. Picker entries come only from the configured catalog.
 
-Playback controls (`space`, `n`, `p`, `+`/`-`, `s`, `r`) work from any tab. In the Search tab or while filtering, letter keys are captured for typing, so `n`/`p`/`s`/`r`/`a` only work as playback controls from the other tabs.
+Playback controls (`space`, `n`, `p`, `+`/`-`, `s`, `r`) work from any tab. The Queue/Library/Search/Lyrics tabs, shuffle and repeat indicators, and progress bar are also clickable; clicking the progress bar seeks to that position. In the Search tab or while filtering, letter keys are captured for typing, so `n`/`p`/`s`/`r`/`a` only work as playback controls from the other tabs.
 
 ### Album Art
 

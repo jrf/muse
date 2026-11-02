@@ -517,6 +517,14 @@ impl MusicBackend for SpotifyBackend {
         let _ = self.api_put(&format!("/me/player/volume?volume_percent={}", vol), None);
     }
 
+    fn seek(&self, position: f64) {
+        let position_ms = (position.max(0.0) * 1000.0).round() as u64;
+        let _ = self.api_put(
+            &format!("/me/player/seek?position_ms={}", position_ms),
+            None,
+        );
+    }
+
     fn toggle_shuffle(&self) {
         let state = self.fetch_state();
         let new_state = !state.shuffle_enabled;

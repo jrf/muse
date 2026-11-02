@@ -26,7 +26,7 @@
 ## Done
 
 - [x] Make bare `just` list all available recipes; installation is explicit with `just install` #improvement
-- [x] Mouse support for playing queue tracks, library playlists/tracks, and search results by left-clicking visible rows #feature
+- [x] Mouse support for clickable tabs, shuffle/repeat, progress seeking, list activation, and wheel scrolling across Queue, Library, Search, and Lyrics #feature
 - [x] Hand-rolled Kitty direct-placement album art renderer (`a=T`) so artwork renders correctly in WezTerm instead of exposing Unicode placeholder glyphs #bug
 - [x] Expanded shared theme support with full-frame background, cursor highlight, selection, and key roles so themes such as synthwave retain their semantic palette #improvement
 - [x] `image_protocol` config option to force a specific image protocol (kitty/sixel/iterm2/halfblocks/auto) when terminal capability detection fails or picks wrong #feature

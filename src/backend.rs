@@ -116,6 +116,7 @@ pub trait MusicBackend: Send + Sync {
     fn next_track(&self);
     fn previous_track(&self);
     fn set_volume(&self, vol: i32);
+    fn seek(&self, position: f64);
     fn toggle_shuffle(&self);
     fn cycle_repeat(&self);
     fn toggle_favorite(&self);

@@ -24,6 +24,7 @@ extern "C" {
     fn music_previous_track();
     fn music_get_volume() -> i32;
     fn music_set_volume(vol: i32);
+    fn music_seek(position: f64);
     fn music_toggle_shuffle();
     fn music_cycle_repeat();
     fn music_toggle_favorite();
@@ -225,6 +226,10 @@ impl MusicBackend for AppleMusicBackend {
 
     fn set_volume(&self, vol: i32) {
         unsafe { music_set_volume(vol) }
+    }
+
+    fn seek(&self, position: f64) {
+        unsafe { music_seek(position) }
     }
 
     fn toggle_shuffle(&self) {

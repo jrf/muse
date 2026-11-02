@@ -71,8 +71,33 @@ pub enum ClickTarget {
     SearchResult(usize),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollTarget {
+    Queue,
+    LibraryPlaylists,
+    LibraryTracks,
+    Search,
+    Lyrics,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScrollHit {
+    pub target: ScrollTarget,
+    pub max_scroll: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PlayerClickTarget {
+    Tab(Tab),
+    Shuffle,
+    Repeat,
+    Seek(f64),
+}
+
 #[derive(Debug, Clone, Copy)]
 struct AppLayout {
+    player: Rect,
+    tabs: Rect,
     tab_content: Rect,
 }
 
@@ -95,6 +120,8 @@ fn app_layout(area: Rect, state: &AppState) -> AppLayout {
     .split(content_area);
 
     AppLayout {
+        player: chunks[0],
+        tabs: chunks[1],
         tab_content: chunks[3],
     }
 }
@@ -112,6 +139,199 @@ fn item_at(area: Rect, scroll: usize, len: usize, column: u16, row: u16) -> Opti
     }
     let index = scroll + usize::from(row - area.y);
     (index < len).then_some(index)
+}
+
+fn filtered_track_len(tracks: &[crate::backend::PlaylistTrack], query: &str) -> usize {
+    if query.is_empty() {
+        return tracks.len();
+    }
+    let query = query.to_lowercase();
+    tracks
+        .iter()
+        .filter(|track| {
+            track.name.to_lowercase().contains(&query)
+                || track.artist.to_lowercase().contains(&query)
+        })
+        .count()
+}
+
+fn list_area(content: Rect, header_rows: u16) -> Rect {
+    Rect::new(
+        content.x,
+        content.y.saturating_add(header_rows),
+        content.width,
+        content.height.saturating_sub(header_rows),
+    )
+}
+
+fn max_scroll(len: usize, area: Rect) -> usize {
+    len.saturating_sub(usize::from(area.height))
+}
+
+fn player_text_area(player: Rect, state: &AppState) -> Rect {
+    if state.show_artwork && player.width >= 30 {
+        Layout::horizontal([
+            Constraint::Length(14),
+            Constraint::Length(2),
+            Constraint::Min(20),
+        ])
+        .split(player)[2]
+    } else {
+        player
+    }
+}
+
+/// Resolve clicks on the tab bar and now-playing controls. Progress clicks are
+/// reported as an absolute position in seconds, measured only over the bar
+/// between the elapsed and total-time labels.
+pub fn player_click_target(
+    area: Rect,
+    state: &AppState,
+    column: u16,
+    row: u16,
+) -> Option<PlayerClickTarget> {
+    if state.overlays.error_message.is_some()
+        || state.overlays.show_help
+        || state.overlays.playlist_picker_visible
+        || state.theme.picker_visible
+    {
+        return None;
+    }
+
+    let layout = app_layout(area, state);
+    if contains(layout.tabs, column, row) {
+        let mut x = layout.tabs.x;
+        for tab in Tab::ALL {
+            let width = tab.label().chars().count() as u16 + 2;
+            if column >= x && column < x.saturating_add(width) {
+                return Some(PlayerClickTarget::Tab(*tab));
+            }
+            x = x.saturating_add(width + 2); // two-cell Tabs divider
+        }
+        return None;
+    }
+
+    let track = state.player.track.as_ref()?;
+    let text = player_text_area(layout.player, state);
+    let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .split(text);
+
+    if contains(rows[4], column, row) {
+        let elapsed_width = format!("{} ", format_time(track.position)).chars().count() as u16;
+        let total_width = format!(" {}", format_time(track.duration)).chars().count() as u16;
+        let bar_width = rows[4]
+            .width
+            .saturating_sub(elapsed_width.saturating_add(total_width));
+        let bar_x = rows[4].x.saturating_add(elapsed_width);
+        if bar_width > 0 && column >= bar_x && column < bar_x.saturating_add(bar_width) {
+            let fraction =
+                f64::from(column - bar_x) / f64::from(bar_width.saturating_sub(1).max(1));
+            return Some(PlayerClickTarget::Seek(
+                (track.duration * fraction).clamp(0.0, track.duration),
+            ));
+        }
+    }
+
+    if contains(rows[6], column, row) {
+        let shuffle = if state.player.shuffle_enabled {
+            "⤮ on "
+        } else {
+            "⤮ off"
+        };
+        let repeat = format!("⟳ {}", state.player.repeat_mode.label());
+        let volume = format!("Vol: {}%", state.player.volume);
+        let controls_width =
+            shuffle.chars().count() + 2 + repeat.chars().count() + 2 + volume.chars().count();
+        let start = rows[6].x + rows[6].width.saturating_sub(controls_width as u16) / 2;
+        let shuffle_end = start.saturating_add(shuffle.chars().count() as u16);
+        let repeat_start = shuffle_end.saturating_add(2);
+        let repeat_end = repeat_start.saturating_add(repeat.chars().count() as u16);
+        if column >= start && column < shuffle_end {
+            return Some(PlayerClickTarget::Shuffle);
+        }
+        if column >= repeat_start && column < repeat_end {
+            return Some(PlayerClickTarget::Repeat);
+        }
+    }
+
+    None
+}
+
+/// Resolve the scrollable region under a terminal cell and its maximum valid
+/// offset. Wheel events over headers, artwork, tabs, or overlays are ignored.
+pub fn scroll_target(area: Rect, state: &AppState, column: u16, row: u16) -> Option<ScrollHit> {
+    if state.overlays.error_message.is_some()
+        || state.overlays.show_help
+        || state.overlays.playlist_picker_visible
+        || state.theme.picker_visible
+    {
+        return None;
+    }
+
+    let content = app_layout(area, state).tab_content;
+    let (target, list, len) = match state.active_tab {
+        Tab::Queue => {
+            let header = u16::from(!state.filter.query.is_empty() || state.filter.active);
+            (
+                ScrollTarget::Queue,
+                list_area(content, header),
+                filtered_track_len(&state.queue.tracks, &state.filter.query),
+            )
+        }
+        Tab::Library => match &state.library.sub_view {
+            LibrarySubView::Playlists => {
+                let header = u16::from(!state.filter.query.is_empty() || state.filter.active);
+                let len = if state.filter.query.is_empty() {
+                    state.library.playlists.len()
+                } else {
+                    let query = state.filter.query.to_lowercase();
+                    state
+                        .library
+                        .playlists
+                        .iter()
+                        .filter(|name| name.to_lowercase().contains(&query))
+                        .count()
+                };
+                (
+                    ScrollTarget::LibraryPlaylists,
+                    list_area(content, header),
+                    len,
+                )
+            }
+            LibrarySubView::Tracks(_) => {
+                let header = if state.filter.query.is_empty() && !state.filter.active {
+                    1
+                } else {
+                    2
+                };
+                (
+                    ScrollTarget::LibraryTracks,
+                    list_area(content, header),
+                    filtered_track_len(&state.library.tracks, &state.filter.query),
+                )
+            }
+        },
+        Tab::Search => (
+            ScrollTarget::Search,
+            list_area(content, 2),
+            state.search.results.len(),
+        ),
+        Tab::Lyrics => (ScrollTarget::Lyrics, content, state.lyrics.lines.len()),
+    };
+
+    contains(list, column, row).then_some(ScrollHit {
+        target,
+        max_scroll: max_scroll(len, list),
+    })
 }
 
 /// Resolve a terminal cell to an interactive list item. The returned indices
@@ -1270,7 +1490,10 @@ fn format_time(seconds: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{app_layout, click_target, ClickTarget};
+    use super::{
+        app_layout, click_target, player_click_target, scroll_target, ClickTarget,
+        PlayerClickTarget, ScrollHit, ScrollTarget,
+    };
     use crate::backend::{PlaylistTrack, SearchResult};
     use crate::state::{AppState, LibrarySubView, Tab};
     use ratatui::layout::Rect;
@@ -1282,6 +1505,59 @@ mod tests {
             album: "album".to_string(),
             duration: 180.0,
         }
+    }
+
+    #[test]
+    fn tab_labels_are_clickable_but_dividers_are_not() {
+        let area = Rect::new(0, 0, 100, 40);
+        let state = AppState::default();
+        let tabs = app_layout(area, &state).tabs;
+
+        assert_eq!(
+            player_click_target(area, &state, tabs.x, tabs.y),
+            Some(PlayerClickTarget::Tab(Tab::Queue))
+        );
+        assert_eq!(
+            player_click_target(area, &state, tabs.x + 11, tabs.y),
+            Some(PlayerClickTarget::Tab(Tab::Library))
+        );
+        assert_eq!(player_click_target(area, &state, tabs.x + 7, tabs.y), None);
+    }
+
+    #[test]
+    fn player_controls_and_progress_are_clickable() {
+        let area = Rect::new(0, 0, 100, 40);
+        let mut state = AppState::default();
+        state.player.track = Some(crate::backend::Track {
+            name: "track".to_string(),
+            artist: "artist".to_string(),
+            album: "album".to_string(),
+            duration: 240.0,
+            position: 60.0,
+        });
+        let player = app_layout(area, &state).player;
+        let text = super::player_text_area(player, &state);
+        let progress_row = text.y + 4;
+        let bar_start = text.x + 5; // "1:00 "
+        let controls_row = text.y + 6;
+
+        assert_eq!(
+            player_click_target(area, &state, bar_start, progress_row),
+            Some(PlayerClickTarget::Seek(0.0))
+        );
+        assert!(matches!(
+            player_click_target(area, &state, text.right() - 6, progress_row),
+            Some(PlayerClickTarget::Seek(position)) if position > 230.0
+        ));
+        let controls_start = text.x + text.width.saturating_sub(22) / 2;
+        assert_eq!(
+            player_click_target(area, &state, controls_start, controls_row),
+            Some(PlayerClickTarget::Shuffle)
+        );
+        assert_eq!(
+            player_click_target(area, &state, controls_start + 7, controls_row),
+            Some(PlayerClickTarget::Repeat)
+        );
     }
 
     #[test]
@@ -1339,6 +1615,48 @@ mod tests {
             Some(ClickTarget::SearchResult(2))
         );
         assert_eq!(click_target(area, &state, list.x, list.y + 1), None);
+    }
+
+    #[test]
+    fn wheel_target_is_bounded_by_visible_filtered_rows() {
+        let area = Rect::new(0, 0, 100, 25);
+        let mut state = AppState::default();
+        state.active_tab = Tab::Queue;
+        state.queue.tracks = (0..30).map(|i| track(&format!("track {i}"))).collect();
+        state.filter.query = "track 1".to_string(); // 11 matches
+        let content = app_layout(area, &state).tab_content;
+        let list_height = content.height.saturating_sub(1);
+
+        assert_eq!(
+            scroll_target(area, &state, content.x, content.y + 1),
+            Some(ScrollHit {
+                target: ScrollTarget::Queue,
+                max_scroll: 11usize.saturating_sub(usize::from(list_height)),
+            })
+        );
+        assert_eq!(scroll_target(area, &state, content.x, content.y), None);
+    }
+
+    #[test]
+    fn lyrics_content_is_scrollable() {
+        let area = Rect::new(0, 0, 100, 25);
+        let mut state = AppState::default();
+        state.active_tab = Tab::Lyrics;
+        state.lyrics.lines = (0..30)
+            .map(|i| crate::backend::LyricsLine {
+                text: format!("line {i}"),
+                time: None,
+            })
+            .collect();
+        let content = app_layout(area, &state).tab_content;
+
+        assert_eq!(
+            scroll_target(area, &state, content.x, content.y),
+            Some(ScrollHit {
+                target: ScrollTarget::Lyrics,
+                max_scroll: 30usize.saturating_sub(usize::from(content.height)),
+            })
+        );
     }
 
     #[test]

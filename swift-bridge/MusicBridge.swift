@@ -124,6 +124,12 @@ public func music_set_volume(_ vol: Int32) {
     _ = runAppleScript(#"tell application "Music" to set sound volume to \#(clamped)"#)
 }
 
+@_cdecl("music_seek")
+public func music_seek(_ position: Double) {
+    let clamped = max(0, position)
+    _ = runAppleScript(#"tell application "Music" to set player position to \#(clamped)"#)
+}
+
 @_cdecl("music_toggle_shuffle")
 public func music_toggle_shuffle() {
     let script = """

@@ -23,7 +23,7 @@ use crate::backend::{self, MusicBackend};
 use crate::playlist;
 use crate::state::{AppState, LibrarySubView, Tab};
 use crate::theme::{self, Theme};
-use crate::ui::{self, ClickTarget};
+use crate::ui::{self, ClickTarget, PlayerClickTarget, ScrollTarget};
 
 const PAGE_SIZE: usize = 20;
 
@@ -342,32 +342,78 @@ pub fn handle_mouse(
     tx: &mpsc::Sender<AppEvent>,
     backend: &Arc<dyn MusicBackend>,
 ) {
-    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
-        return;
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if let Some(target) =
+                ui::player_click_target(terminal_area, state, mouse.column, mouse.row)
+            {
+                match target {
+                    PlayerClickTarget::Tab(tab) => {
+                        clear_filter(state);
+                        state.active_tab = tab;
+                    }
+                    PlayerClickTarget::Shuffle => {
+                        state.player.shuffle_enabled = !state.player.shuffle_enabled;
+                        fire_and_refresh(backend, tx, |backend| backend.toggle_shuffle());
+                    }
+                    PlayerClickTarget::Repeat => {
+                        state.player.repeat_mode = match state.player.repeat_mode {
+                            backend::RepeatMode::Off => backend::RepeatMode::All,
+                            backend::RepeatMode::All => backend::RepeatMode::One,
+                            backend::RepeatMode::One => backend::RepeatMode::Off,
+                        };
+                        fire_and_refresh(backend, tx, |backend| backend.cycle_repeat());
+                    }
+                    PlayerClickTarget::Seek(position) => {
+                        if let Some(track) = state.player.track.as_mut() {
+                            track.position = position;
+                        }
+                        fire_and_refresh(backend, tx, move |backend| backend.seek(position));
+                    }
+                }
+                return;
+            }
+
+            let Some(target) = ui::click_target(terminal_area, state, mouse.column, mouse.row)
+            else {
+                return;
+            };
+
+            match target {
+                ClickTarget::QueueItem(index) => state.queue.selected = index,
+                ClickTarget::LibraryPlaylist(index) => state.library.selected = index,
+                ClickTarget::LibraryTrack(index) => state.library.tracks_selected = index,
+                ClickTarget::SearchResult(index) => {
+                    state.search.selected = index;
+                    state.search.editing = false;
+                }
+            }
+
+            let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+            let _ = handle_key(enter, state, theme, tx, backend);
+        }
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+            let Some(hit) = ui::scroll_target(terminal_area, state, mouse.column, mouse.row) else {
+                return;
+            };
+            let current = match hit.target {
+                ScrollTarget::Queue => &mut state.queue.scroll,
+                ScrollTarget::LibraryPlaylists => &mut state.library.scroll,
+                ScrollTarget::LibraryTracks => &mut state.library.tracks_scroll,
+                ScrollTarget::Search => &mut state.search.scroll,
+                ScrollTarget::Lyrics => {
+                    state.lyrics.manual_scroll = true;
+                    &mut state.lyrics.scroll
+                }
+            };
+            *current = match mouse.kind {
+                MouseEventKind::ScrollUp => current.saturating_sub(3),
+                MouseEventKind::ScrollDown => current.saturating_add(3).min(hit.max_scroll),
+                _ => unreachable!(),
+            };
+        }
+        _ => {}
     }
-
-    let Some(target) = ui::click_target(terminal_area, state, mouse.column, mouse.row) else {
-        return;
-    };
-
-    match target {
-        ClickTarget::QueueItem(index) => {
-            state.queue.selected = index;
-        }
-        ClickTarget::LibraryPlaylist(index) => {
-            state.library.selected = index;
-        }
-        ClickTarget::LibraryTrack(index) => {
-            state.library.tracks_selected = index;
-        }
-        ClickTarget::SearchResult(index) => {
-            state.search.selected = index;
-            state.search.editing = false;
-        }
-    }
-
-    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-    let _ = handle_key(enter, state, theme, tx, backend);
 }
 
 /// Returns true if the app should quit.
