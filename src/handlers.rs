@@ -15,19 +15,22 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::artwork::{ArtCtx, Artwork, KittyArt};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use image::ImageReader;
+use ratatui::layout::Rect;
 
 use crate::backend::{self, MusicBackend};
 use crate::playlist;
 use crate::state::{AppState, LibrarySubView, Tab};
 use crate::theme::{self, Theme};
+use crate::ui::{self, ClickTarget};
 
 const PAGE_SIZE: usize = 20;
 
 /// Events sent to the main loop.
 pub enum AppEvent {
     Key(KeyEvent),
+    Mouse(MouseEvent),
     Tick,
     MusicNotification(backend::NotificationInfo),
     StateRefreshed(backend::FullState),
@@ -326,7 +329,46 @@ pub fn handle_notification(
     state.player.music_running = true;
 }
 
-// MARK: - Key handling
+// MARK: - Input handling
+
+/// Select and activate a queue, library, or search row with the left mouse
+/// button. Activation is delegated to the existing Enter-key handlers so mouse
+/// and keyboard behavior cannot drift apart.
+pub fn handle_mouse(
+    mouse: MouseEvent,
+    terminal_area: Rect,
+    state: &mut AppState,
+    theme: &mut Theme,
+    tx: &mpsc::Sender<AppEvent>,
+    backend: &Arc<dyn MusicBackend>,
+) {
+    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+        return;
+    }
+
+    let Some(target) = ui::click_target(terminal_area, state, mouse.column, mouse.row) else {
+        return;
+    };
+
+    match target {
+        ClickTarget::QueueItem(index) => {
+            state.queue.selected = index;
+        }
+        ClickTarget::LibraryPlaylist(index) => {
+            state.library.selected = index;
+        }
+        ClickTarget::LibraryTrack(index) => {
+            state.library.tracks_selected = index;
+        }
+        ClickTarget::SearchResult(index) => {
+            state.search.selected = index;
+            state.search.editing = false;
+        }
+    }
+
+    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    let _ = handle_key(enter, state, theme, tx, backend);
+}
 
 /// Returns true if the app should quit.
 pub fn handle_key(

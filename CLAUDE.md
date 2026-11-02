@@ -9,7 +9,8 @@ Muse is a terminal UI for controlling music playback on macOS. It supports Apple
 ## Build Commands
 
 ```bash
-just          # Build release + install to ~/.local/bin + codesign
+just          # List all available recipes
+just install  # Build release + install to ~/.local/bin + codesign
 just build    # Debug build
 just run      # Run debug build
 just release  # Release build only
@@ -48,7 +49,7 @@ Single file exporting ~40 `@_cdecl` functions. Controls Music.app via AppleScrip
 ### Other Modules
 
 - **`main.rs`** — Entry point, terminal setup, `run_app()` event loop with `mpsc` channel, CLI subcommands (`muse next`, `muse prev`, etc.), and config loading. Position interpolation is computed at render time inside `ui::draw` using an `elapsed` parameter (no full AppState clone).
-- **`handlers.rs`** — Event handlers (key handlers per tab, `apply_fresh_state`, `handle_notification`), the `AppEvent` enum, navigation/filter helpers, and the `fire_and_refresh` / `perform_search` thread spawners.
+- **`handlers.rs`** — Event handlers (keyboard and mouse handlers, `apply_fresh_state`, `handle_notification`), the `AppEvent` enum, navigation/filter helpers, and the `fire_and_refresh` / `perform_search` thread spawners. Left-click activation selects a UI hit target and delegates to the existing Enter-key path.
 - **`ui.rs`** — Ratatui rendering. Takes `&mut AppState` so it can temporarily move `player.artwork` out, apply lyric auto-scroll, and render without cloning. Centered 120-column layout with player section, tab bar, and tab content area (Queue, Library, Search, Lyrics, Themes). `draw` returns an `Option<KittyPlacement>` so the main loop can emit hand-rolled Kitty graphics after the frame flushes.
 - **`artwork.rs`** — Album-art rendering abstraction. `ArtCtx` holds the ratatui-image `Picker` plus a `kitty` flag. `Artwork` is an enum: `Ratatui(StatefulProtocol)` for Sixel/iTerm2/halfblocks (drawn as a widget) or `Kitty(KittyArt)` for the hand-rolled **direct-placement** (`a=T`) Kitty path. The Kitty path decodes artwork to a base64 PNG once, computes an aspect-correct cell box (`KittyArt::fit`), and emits chunked `\x1b_G...` escapes. Inline RFC 4648 base64 (no dep). This exists because ratatui-image's Kitty backend uses Unicode placeholders (`U=1`, `\u{10EEEE}`) that WezTerm doesn't render; direct placement (like `rview`) works there.
 - **`state.rs`** — `AppState` decomposed into per-concern sub-structs: `PlayerData`, `QueueData`, `LibraryData`, `SearchData`, `LyricsData`, `ThemeData`, `OverlayData`, `FilterData`. Top-level fields are config (`ui_width`, `show_artwork`, `lyrics_enabled`), active tab, and `lastfm_status`.
@@ -63,7 +64,7 @@ The original pure-Swift TUI (direct ANSI rendering). Not used when building with
 ## Key Patterns
 
 - **Backend abstraction**: `Arc<dyn MusicBackend>` passed through `run_app` → handlers. All `bridge::*` calls replaced with `backend.*` method calls. Background threads clone the `Arc`.
-- **Async event model**: Background threads send results via `AppEvent` enum through `mpsc::Sender`. The main loop renders on each event or 50ms timeout.
+- **Async event model**: Background threads and the crossterm input thread send results through the `AppEvent` enum (`Key`, `Mouse`, backend results, and ticks). The main loop renders on each event or 50ms timeout. Mouse capture is enabled only while the alternate-screen TUI is active and disabled during terminal restoration.
 - **Notification bridge**: Backend sends `NotificationInfo` through a channel. Apple Music: C callback from `NSDistributedNotificationCenter`. Spotify: polling thread every 2s.
 - **Position interpolation**: Base position from periodic polls; `ui::draw` adds elapsed wall-clock time to `track.position` at render time so playback progresses smoothly between 2-second refreshes. No state clone.
 - **Transient resilience**: `apply_fresh_state()` keeps the previous track visible during backend failures that occur during track transitions.

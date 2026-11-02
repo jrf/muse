@@ -17,7 +17,7 @@ use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use crossterm::{
-    event::{self, Event},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -26,7 +26,9 @@ use ratatui_image::picker::{Picker, ProtocolType};
 
 use artwork::{ArtCtx, Artwork, KittyPlacement, KITTY_DELETE_ALL};
 use backend::MusicBackend;
-use handlers::{apply_fresh_state, fetch_artwork, handle_key, handle_notification, AppEvent};
+use handlers::{
+    apply_fresh_state, fetch_artwork, handle_key, handle_mouse, handle_notification, AppEvent,
+};
 use state::{AppState, LibrarySubView, Tab};
 use theme::Theme;
 
@@ -160,7 +162,12 @@ fn main() -> io::Result<()> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, crossterm::cursor::Hide)?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        crossterm::cursor::Hide
+    )?;
     let ratatui_backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(ratatui_backend)?;
 
@@ -179,6 +186,7 @@ fn main() -> io::Result<()> {
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
+        DisableMouseCapture,
         LeaveAlternateScreen,
         crossterm::cursor::Show
     )?;
@@ -289,10 +297,13 @@ fn run_app(
             break;
         }
         if event::poll(Duration::from_millis(50)).unwrap_or(false) {
-            if let Ok(Event::Key(key)) = event::read() {
-                if tx_input.send(AppEvent::Key(key)).is_err() {
-                    break;
-                }
+            let app_event = match event::read() {
+                Ok(Event::Key(key)) => Some(AppEvent::Key(key)),
+                Ok(Event::Mouse(mouse)) => Some(AppEvent::Mouse(mouse)),
+                _ => None,
+            };
+            if app_event.is_some_and(|event| tx_input.send(event).is_err()) {
+                break;
             }
         }
     });
@@ -347,6 +358,11 @@ fn run_app(
                     if handle_key(key, &mut state, &mut current_theme, &tx, &backend) {
                         break 'main_loop Ok(());
                     }
+                }
+                AppEvent::Mouse(mouse) => {
+                    let size = terminal.size()?;
+                    let area = Rect::new(0, 0, size.width, size.height);
+                    handle_mouse(mouse, area, &mut state, &mut current_theme, &tx, &backend);
                 }
                 AppEvent::Tick => {
                     // Let backend do periodic main-thread work (e.g. pump RunLoop)

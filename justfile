@@ -1,4 +1,6 @@
-default: install
+# List all available commands
+default:
+    @just --list
 
 # Build in debug mode
 build:

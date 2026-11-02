@@ -63,6 +63,163 @@ fn apply_lyrics_autoscroll(state: &mut AppState, effective_position: Option<f64>
     state.lyrics.scroll = target.min(max_scroll);
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClickTarget {
+    QueueItem(usize),
+    LibraryPlaylist(usize),
+    LibraryTrack(usize),
+    SearchResult(usize),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AppLayout {
+    tab_content: Rect,
+}
+
+fn app_layout(area: Rect, state: &AppState) -> AppLayout {
+    let box_w = if state.ui_width == 0 {
+        area.width
+    } else {
+        area.width.min(state.ui_width)
+    };
+    let h_pad = (area.width.saturating_sub(box_w)) / 2;
+    let inner = Rect::new(area.x + h_pad, area.y, box_w, area.height);
+    let content_area = inner.inner(Margin::new(1, 1));
+    let chunks = Layout::vertical([
+        Constraint::Length(player_height(state)),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(3),
+        Constraint::Length(1),
+    ])
+    .split(content_area);
+
+    AppLayout {
+        tab_content: chunks[3],
+    }
+}
+
+fn contains(area: Rect, column: u16, row: u16) -> bool {
+    column >= area.x
+        && column < area.x.saturating_add(area.width)
+        && row >= area.y
+        && row < area.y.saturating_add(area.height)
+}
+
+fn item_at(area: Rect, scroll: usize, len: usize, column: u16, row: u16) -> Option<usize> {
+    if !contains(area, column, row) {
+        return None;
+    }
+    let index = scroll + usize::from(row - area.y);
+    (index < len).then_some(index)
+}
+
+/// Resolve a terminal cell to an interactive list item. The returned indices
+/// are display indices, matching each list's selection state even when a
+/// queue/library filter maps them to different backend indices.
+pub fn click_target(area: Rect, state: &AppState, column: u16, row: u16) -> Option<ClickTarget> {
+    if state.overlays.error_message.is_some()
+        || state.overlays.show_help
+        || state.overlays.playlist_picker_visible
+        || state.theme.picker_visible
+    {
+        return None;
+    }
+
+    let content = app_layout(area, state).tab_content;
+    match state.active_tab {
+        Tab::Queue => {
+            let filtered_len = if state.filter.query.is_empty() {
+                state.queue.tracks.len()
+            } else {
+                let query = state.filter.query.to_lowercase();
+                state
+                    .queue
+                    .tracks
+                    .iter()
+                    .filter(|track| {
+                        track.name.to_lowercase().contains(&query)
+                            || track.artist.to_lowercase().contains(&query)
+                    })
+                    .count()
+            };
+            let has_filter = !state.filter.query.is_empty() || state.filter.active;
+            let list = if has_filter {
+                Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(content)[1]
+            } else {
+                content
+            };
+            item_at(list, state.queue.scroll, filtered_len, column, row).map(ClickTarget::QueueItem)
+        }
+        Tab::Library => match &state.library.sub_view {
+            LibrarySubView::Playlists => {
+                let filtered_len = if state.filter.query.is_empty() {
+                    state.library.playlists.len()
+                } else {
+                    let query = state.filter.query.to_lowercase();
+                    state
+                        .library
+                        .playlists
+                        .iter()
+                        .filter(|name| name.to_lowercase().contains(&query))
+                        .count()
+                };
+                let has_filter = !state.filter.query.is_empty() || state.filter.active;
+                let list = if has_filter {
+                    Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(content)[1]
+                } else {
+                    content
+                };
+                item_at(list, state.library.scroll, filtered_len, column, row)
+                    .map(ClickTarget::LibraryPlaylist)
+            }
+            LibrarySubView::Tracks(_) => {
+                let filtered_len = if state.filter.query.is_empty() {
+                    state.library.tracks.len()
+                } else {
+                    let query = state.filter.query.to_lowercase();
+                    state
+                        .library
+                        .tracks
+                        .iter()
+                        .filter(|track| {
+                            track.name.to_lowercase().contains(&query)
+                                || track.artist.to_lowercase().contains(&query)
+                        })
+                        .count()
+                };
+                let has_filter = !state.filter.query.is_empty() || state.filter.active;
+                let header_rows = if has_filter { 2 } else { 1 };
+                let list = Rect::new(
+                    content.x,
+                    content.y.saturating_add(header_rows),
+                    content.width,
+                    content.height.saturating_sub(header_rows),
+                );
+                item_at(list, state.library.tracks_scroll, filtered_len, column, row)
+                    .map(ClickTarget::LibraryTrack)
+            }
+        },
+        Tab::Search => {
+            let list = Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(1),
+            ])
+            .split(content)[2];
+            item_at(
+                list,
+                state.search.scroll,
+                state.search.results.len(),
+                column,
+                row,
+            )
+            .map(ClickTarget::SearchResult)
+        }
+        Tab::Lyrics => None,
+    }
+}
+
 fn do_draw(
     f: &mut Frame,
     state: &AppState,
@@ -1109,4 +1266,89 @@ fn format_time(seconds: f64) -> String {
     let m = total / 60;
     let s = total % 60;
     format!("{}:{:02}", m, s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{app_layout, click_target, ClickTarget};
+    use crate::backend::{PlaylistTrack, SearchResult};
+    use crate::state::{AppState, LibrarySubView, Tab};
+    use ratatui::layout::Rect;
+
+    fn track(name: &str) -> PlaylistTrack {
+        PlaylistTrack {
+            name: name.to_string(),
+            artist: "artist".to_string(),
+            album: "album".to_string(),
+            duration: 180.0,
+        }
+    }
+
+    #[test]
+    fn queue_click_accounts_for_filter_row_and_scroll() {
+        let area = Rect::new(0, 0, 100, 40);
+        let mut state = AppState::default();
+        state.active_tab = Tab::Queue;
+        state.filter.active = true;
+        state.queue.tracks = (0..12).map(|i| track(&format!("track {i}"))).collect();
+        state.queue.scroll = 4;
+        let list = app_layout(area, &state).tab_content;
+
+        assert_eq!(
+            click_target(area, &state, list.x, list.y + 1),
+            Some(ClickTarget::QueueItem(4))
+        );
+        assert_eq!(click_target(area, &state, list.x, list.y), None);
+    }
+
+    #[test]
+    fn library_track_click_skips_header_and_filter_rows() {
+        let area = Rect::new(0, 0, 100, 40);
+        let mut state = AppState::default();
+        state.active_tab = Tab::Library;
+        state.filter.active = true;
+        state.library.sub_view = LibrarySubView::Tracks("playlist".to_string());
+        state.library.tracks = (0..10).map(|i| track(&format!("track {i}"))).collect();
+        state.library.tracks_scroll = 3;
+        let list = app_layout(area, &state).tab_content;
+
+        assert_eq!(
+            click_target(area, &state, list.x, list.y + 2),
+            Some(ClickTarget::LibraryTrack(3))
+        );
+        assert_eq!(click_target(area, &state, list.x, list.y + 1), None);
+    }
+
+    #[test]
+    fn search_click_skips_input_and_gap() {
+        let area = Rect::new(0, 0, 100, 40);
+        let mut state = AppState::default();
+        state.active_tab = Tab::Search;
+        state.search.results = (0..8)
+            .map(|i| SearchResult {
+                name: format!("result {i}"),
+                artist: "artist".to_string(),
+                album: "album".to_string(),
+            })
+            .collect();
+        state.search.scroll = 2;
+        let list = app_layout(area, &state).tab_content;
+
+        assert_eq!(
+            click_target(area, &state, list.x, list.y + 2),
+            Some(ClickTarget::SearchResult(2))
+        );
+        assert_eq!(click_target(area, &state, list.x, list.y + 1), None);
+    }
+
+    #[test]
+    fn overlays_block_underlying_clicks() {
+        let area = Rect::new(0, 0, 100, 40);
+        let mut state = AppState::default();
+        state.queue.tracks.push(track("track"));
+        state.overlays.show_help = true;
+        let list = app_layout(area, &state).tab_content;
+
+        assert_eq!(click_target(area, &state, list.x, list.y), None);
+    }
 }

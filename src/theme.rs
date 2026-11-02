@@ -71,8 +71,8 @@ fn parse_theme(contents: &str) -> Option<Theme> {
     // Background roles were added after the original foreground-only schema.
     // Keep old themes loadable: an omitted background means "use the terminal
     // default", while cursor_bg falls back to that same background.
-    let background = resolve(&["background"], &["bg", "base", "background"])
-        .unwrap_or(Color::Reset);
+    let background =
+        resolve(&["background"], &["bg", "base", "background"]).unwrap_or(Color::Reset);
     let cursor_bg = resolve(
         &["cursor_bg"],
         &["bg_highlight", "surface0", "cursor_bg", "bg"],

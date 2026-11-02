@@ -33,8 +33,10 @@ A terminal UI for controlling Apple Music and Spotify on macOS.
 ```
 git clone <repo-url>
 cd muse
-just
+just install
 ```
+
+Running `just` without a command lists all available recipes.
 
 On Linux, `cargo build --release` works out of the box — the Apple Music backend is automatically skipped on non-macOS platforms.
 
@@ -136,6 +138,7 @@ Launch `muse` in any terminal. The player panel at the top always shows the curr
 | `PgUp` / `PgDn` | Page up / down |
 | `Home` / `End` | Jump to top / bottom |
 | `Enter` | Play track / playlist |
+| Left click | Play a queue track, library playlist/track, or search result |
 | `→` | Browse playlist tracks (Library) |
 | `Q` | Load playlist into queue without playing (Library) |
 | `/` | Filter list (queue/library) / Search |
@@ -146,9 +149,9 @@ Launch `muse` in any terminal. The player panel at the top always shows the curr
 
 ### Tabs
 
-- **Queue** — tracks from the last playlist you played. Select a track and press Enter to jump to it. Tracks auto-advance when the current one finishes. Press `d` to remove a track. Press `/` to filter by name or artist.
-- **Library** — browse your playlists. Press Enter on a playlist to start playing it; press `→` to browse its tracks first, or `Q` to load it into the queue without starting playback. Inside a playlist, Enter plays the selected track. Press `d` to remove a track from the playlist. Backspace goes back to the playlist list. Press `/` to filter playlists or tracks.
-- **Search** — type to search your library. Results appear as you type (minimum 2 characters). Enter plays the selected result.
+- **Queue** — tracks from the last playlist you played. Select a track and press Enter, or left-click it, to jump to it. Tracks auto-advance when the current one finishes. Press `d` to remove a track. Press `/` to filter by name or artist.
+- **Library** — browse your playlists. Press Enter or left-click a playlist to start playing it; press `→` to browse its tracks first, or `Q` to load it into the queue without starting playback. Inside a playlist, Enter or left-click plays the selected track. Press `d` to remove a track from the playlist. Backspace goes back to the playlist list. Press `/` to filter playlists or tracks.
+- **Search** — type to search your library. Results appear as you type (minimum 2 characters). Enter or left-click plays the selected result.
 - **Lyrics** — displays lyrics for the current track. Fetched from [LRCLIB](https://lrclib.net) (falls back to embedded lyrics if available). Scroll with arrow keys. Shows "No lyrics available" when none are found.
 
 Press `t` from any tab to open the theme picker overlay. Navigate with arrow keys, preview live, and press Enter to apply for the current session. Picker entries come only from the configured catalog.
