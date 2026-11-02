@@ -13,8 +13,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::backend::{
-    FullState, LyricsLine, LyricsResult, MusicBackend, NotificationInfo, PlaylistTrack,
-    PlayerState, RepeatMode, SearchResult, Track,
+    FullState, LyricsLine, LyricsResult, MusicBackend, NotificationInfo, PlayerState,
+    PlaylistTrack, RepeatMode, SearchResult, Track,
 };
 
 // MARK: - OAuth token
@@ -87,9 +87,7 @@ impl SpotifyBackend {
         );
 
         // Open browser
-        let _ = std::process::Command::new("open")
-            .arg(&auth_url)
-            .spawn();
+        let _ = std::process::Command::new("open").arg(&auth_url).spawn();
 
         // Listen for the redirect
         let listener = TcpListener::bind("127.0.0.1:18234")
@@ -228,7 +226,10 @@ impl SpotifyBackend {
     fn save_cached_token(token: &SpotifyToken) {
         let path = Self::token_path();
         let _ = std::fs::create_dir_all(path.parent().unwrap());
-        let _ = std::fs::write(path, serde_json::to_string_pretty(token).unwrap_or_default());
+        let _ = std::fs::write(
+            path,
+            serde_json::to_string_pretty(token).unwrap_or_default(),
+        );
     }
 
     fn is_authenticated(&self) -> bool {
@@ -286,8 +287,7 @@ impl SpotifyBackend {
                 .send_string(&body.to_string())
                 .map_err(|e| format!("API PUT failed: {}", e))?;
         } else {
-            req.call()
-                .map_err(|e| format!("API PUT failed: {}", e))?;
+            req.call().map_err(|e| format!("API PUT failed: {}", e))?;
         }
 
         Ok(())
@@ -304,8 +304,7 @@ impl SpotifyBackend {
                 .send_string(&body.to_string())
                 .map_err(|e| format!("API POST failed: {}", e))?;
         } else {
-            req.call()
-                .map_err(|e| format!("API POST failed: {}", e))?;
+            req.call().map_err(|e| format!("API POST failed: {}", e))?;
         }
 
         Ok(())
@@ -338,11 +337,7 @@ impl SpotifyBackend {
             urlencoded(artist),
         );
 
-        let resp: serde_json::Value = ureq::get(&url)
-            .call()
-            .ok()?
-            .into_json()
-            .ok()?;
+        let resp: serde_json::Value = ureq::get(&url).call().ok()?.into_json().ok()?;
 
         // Prefer synced lyrics
         if let Some(synced) = resp["syncedLyrics"].as_str() {
@@ -528,10 +523,7 @@ impl MusicBackend for SpotifyBackend {
     fn toggle_shuffle(&self) {
         let state = self.fetch_state();
         let new_state = !state.shuffle_enabled;
-        let _ = self.api_put(
-            &format!("/me/player/shuffle?state={}", new_state),
-            None,
-        );
+        let _ = self.api_put(&format!("/me/player/shuffle?state={}", new_state), None);
     }
 
     fn cycle_repeat(&self) {
@@ -559,8 +551,7 @@ impl MusicBackend for SpotifyBackend {
                             .and_then(|v| v.as_bool())
                             .unwrap_or(false);
 
-                        let body =
-                            serde_json::json!({ "ids": [id] });
+                        let body = serde_json::json!({ "ids": [id] });
                         if is_saved {
                             let _ = self.api_delete("/me/tracks", Some(&body));
                         } else {
@@ -577,10 +568,7 @@ impl MusicBackend for SpotifyBackend {
         let mut offset = 0;
 
         loop {
-            let resp = match self.api_get(&format!(
-                "/me/playlists?limit=50&offset={}",
-                offset
-            )) {
+            let resp = match self.api_get(&format!("/me/playlists?limit=50&offset={}", offset)) {
                 Ok(v) => v,
                 Err(_) => break,
             };
@@ -694,9 +682,7 @@ impl MusicBackend for SpotifyBackend {
                     .map(|item| {
                         let artists: Vec<&str> = item["artists"]
                             .as_array()
-                            .map(|arr| {
-                                arr.iter().filter_map(|a| a["name"].as_str()).collect()
-                            })
+                            .map(|arr| arr.iter().filter_map(|a| a["name"].as_str()).collect())
                             .unwrap_or_default();
 
                         SearchResult {
@@ -744,9 +730,7 @@ impl MusicBackend for SpotifyBackend {
 
         let resp = ureq::get(url).call().ok()?;
         let mut data = Vec::new();
-        resp.into_reader()
-            .read_to_end(&mut data)
-            .ok()?;
+        resp.into_reader().read_to_end(&mut data).ok()?;
 
         Some(data)
     }
@@ -803,10 +787,7 @@ impl MusicBackend for SpotifyBackend {
 
         if let Some(uri) = resp["item"]["uri"].as_str() {
             let body = serde_json::json!({ "uris": [uri] });
-            let _ = self.api_post(
-                &format!("/playlists/{}/tracks", playlist_id),
-                Some(&body),
-            );
+            let _ = self.api_post(&format!("/playlists/{}/tracks", playlist_id), Some(&body));
         }
     }
 
@@ -833,10 +814,7 @@ impl MusicBackend for SpotifyBackend {
             let body = serde_json::json!({
                 "tracks": [{ "uri": uri, "positions": [index] }]
             });
-            let _ = self.api_delete(
-                &format!("/playlists/{}/tracks", playlist_id),
-                Some(&body),
-            );
+            let _ = self.api_delete(&format!("/playlists/{}/tracks", playlist_id), Some(&body));
         }
     }
 
@@ -877,17 +855,17 @@ impl MusicBackend for SpotifyBackend {
                 }
                 .to_string();
 
-                let (track_name, artist, album, duration_ms) =
-                    if let Some(ref track) = state.track {
-                        (
-                            track.name.clone(),
-                            track.artist.clone(),
-                            track.album.clone(),
-                            track.duration * 1000.0,
-                        )
-                    } else {
-                        (String::new(), String::new(), String::new(), 0.0)
-                    };
+                let (track_name, artist, album, duration_ms) = if let Some(ref track) = state.track
+                {
+                    (
+                        track.name.clone(),
+                        track.artist.clone(),
+                        track.album.clone(),
+                        track.duration * 1000.0,
+                    )
+                } else {
+                    (String::new(), String::new(), String::new(), 0.0)
+                };
 
                 // Only send notification if something changed
                 if track_name != last_track_name || player_state_str != last_player_state {

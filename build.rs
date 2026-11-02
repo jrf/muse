@@ -88,13 +88,15 @@ fn main() {
     }
 
     // Find Swift toolchain lib directory
-    if let Ok(output) = Command::new("xcrun")
-        .args(["--find", "swiftc"])
-        .output()
-    {
+    if let Ok(output) = Command::new("xcrun").args(["--find", "swiftc"]).output() {
         let swiftc_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if let Some(bin_dir) = PathBuf::from(&swiftc_path).parent() {
-            let lib_dir = bin_dir.parent().unwrap().join("lib").join("swift").join("macosx");
+            let lib_dir = bin_dir
+                .parent()
+                .unwrap()
+                .join("lib")
+                .join("swift")
+                .join("macosx");
             if lib_dir.exists() {
                 println!("cargo:rustc-link-search=native={}", lib_dir.display());
             }

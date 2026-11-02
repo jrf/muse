@@ -20,7 +20,17 @@ pub fn is_available() -> bool {
 /// Send "now playing" update.
 pub fn now_playing(artist: &str, track: &str, album: &str, duration: u64) -> Result<(), String> {
     let output = Command::new(BIN)
-        .args(["now-playing", "--artist", artist, "--track", track, "--album", album, "--duration", &duration.to_string()])
+        .args([
+            "now-playing",
+            "--artist",
+            artist,
+            "--track",
+            track,
+            "--album",
+            album,
+            "--duration",
+            &duration.to_string(),
+        ])
         .output()
         .map_err(|e| format!("Failed to run muse-scrobble: {}", e))?;
     if output.status.success() {
@@ -32,15 +42,26 @@ pub fn now_playing(artist: &str, track: &str, album: &str, duration: u64) -> Res
 }
 
 /// Submit a scrobble (fire and forget from a background thread).
-pub fn scrobble(artist: &str, track: &str, album: &str, duration: u64, timestamp: u64) -> Result<(), String> {
+pub fn scrobble(
+    artist: &str,
+    track: &str,
+    album: &str,
+    duration: u64,
+    timestamp: u64,
+) -> Result<(), String> {
     let output = Command::new(BIN)
         .args([
             "scrobble",
-            "--artist", artist,
-            "--track", track,
-            "--album", album,
-            "--duration", &duration.to_string(),
-            "--timestamp", &timestamp.to_string(),
+            "--artist",
+            artist,
+            "--track",
+            track,
+            "--album",
+            album,
+            "--duration",
+            &duration.to_string(),
+            "--timestamp",
+            &timestamp.to_string(),
         ])
         .output()
         .map_err(|e| format!("Failed to run muse-scrobble: {}", e))?;

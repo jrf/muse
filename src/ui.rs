@@ -63,6 +63,29 @@ fn apply_lyrics_autoscroll(state: &mut AppState, effective_position: Option<f64>
     state.lyrics.scroll = target.min(max_scroll);
 }
 
+const TAB_PADDING_LEFT: &str = " ";
+const TAB_PADDING_RIGHT: &str = " ";
+const TAB_DIVIDER: &str = "  ";
+
+/// Return the rendered span of each tab title, including Ratatui's padding.
+/// Kept beside `draw_tab_bar` so click hit-testing uses the same geometry.
+fn tab_ranges(area: Rect) -> Vec<(Tab, u16, u16)> {
+    let mut x = area.x;
+    let padding = (TAB_PADDING_LEFT.chars().count() + TAB_PADDING_RIGHT.chars().count()) as u16;
+    let divider = TAB_DIVIDER.chars().count() as u16;
+
+    Tab::ALL
+        .iter()
+        .map(|tab| {
+            let start = x;
+            let width = tab.label().chars().count() as u16 + 2 + padding;
+            let end = start.saturating_add(width);
+            x = end.saturating_add(divider);
+            (*tab, start, end)
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClickTarget {
     QueueItem(usize),
@@ -200,15 +223,10 @@ pub fn player_click_target(
 
     let layout = app_layout(area, state);
     if contains(layout.tabs, column, row) {
-        let mut x = layout.tabs.x;
-        for tab in Tab::ALL {
-            let width = tab.label().chars().count() as u16 + 2;
-            if column >= x && column < x.saturating_add(width) {
-                return Some(PlayerClickTarget::Tab(*tab));
-            }
-            x = x.saturating_add(width + 2); // two-cell Tabs divider
-        }
-        return None;
+        return tab_ranges(layout.tabs)
+            .into_iter()
+            .find(|(_, start, end)| column >= *start && column < *end)
+            .map(|(tab, _, _)| PlayerClickTarget::Tab(tab));
     }
 
     let track = state.player.track.as_ref()?;
@@ -733,7 +751,11 @@ fn draw_tab_bar(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
 
     let tabs = Tabs::new(titles)
         .select(selected)
-        .divider(Span::styled("  ", Style::default().fg(theme.text_muted)))
+        .padding(TAB_PADDING_LEFT, TAB_PADDING_RIGHT)
+        .divider(Span::styled(
+            TAB_DIVIDER,
+            Style::default().fg(theme.text_muted),
+        ))
         .highlight_style(
             Style::default()
                 .fg(theme.selection)
@@ -1491,7 +1513,7 @@ fn format_time(seconds: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        app_layout, click_target, player_click_target, scroll_target, ClickTarget,
+        app_layout, click_target, player_click_target, scroll_target, tab_ranges, ClickTarget,
         PlayerClickTarget, ScrollHit, ScrollTarget,
     };
     use crate::backend::{PlaylistTrack, SearchResult};
@@ -1508,20 +1530,36 @@ mod tests {
     }
 
     #[test]
-    fn tab_labels_are_clickable_but_dividers_are_not() {
+    fn every_rendered_tab_label_is_clickable() {
         let area = Rect::new(0, 0, 100, 40);
         let state = AppState::default();
         let tabs = app_layout(area, &state).tabs;
+        let backend = ratatui::backend::TestBackend::new(area.width, area.height);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| super::draw_tab_bar(frame, tabs, &state, &crate::theme::default_theme()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered: String = (tabs.left()..tabs.right())
+            .map(|x| buffer[(x, tabs.y)].symbol())
+            .collect();
 
-        assert_eq!(
-            player_click_target(area, &state, tabs.x, tabs.y),
-            Some(PlayerClickTarget::Tab(Tab::Queue))
-        );
-        assert_eq!(
-            player_click_target(area, &state, tabs.x + 11, tabs.y),
-            Some(PlayerClickTarget::Tab(Tab::Library))
-        );
-        assert_eq!(player_click_target(area, &state, tabs.x + 7, tabs.y), None);
+        for tab in Tab::ALL {
+            let label_start = rendered
+                .find(tab.label())
+                .unwrap_or_else(|| panic!("{} was not rendered", tab.label()))
+                as u16;
+            let column = tabs.x + label_start;
+            assert_eq!(
+                player_click_target(area, &state, column, tabs.y),
+                Some(PlayerClickTarget::Tab(*tab)),
+                "{} should be clickable",
+                tab.label()
+            );
+        }
+
+        let divider = tab_ranges(tabs)[0].2;
+        assert_eq!(player_click_target(area, &state, divider, tabs.y), None);
     }
 
     #[test]

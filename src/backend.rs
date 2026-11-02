@@ -166,11 +166,7 @@ pub trait MusicBackend: Send + Sync {
     ///
     /// For Apple Music: registers a C callback via NSDistributedNotificationCenter.
     /// For Spotify: spawns a polling thread that checks the API periodically.
-    fn setup_notifications(
-        &self,
-        tx: mpsc::Sender<NotificationInfo>,
-        shutdown: Arc<AtomicBool>,
-    );
+    fn setup_notifications(&self, tx: mpsc::Sender<NotificationInfo>, shutdown: Arc<AtomicBool>);
 
     /// Called periodically from the main thread (~100ms).
     ///
